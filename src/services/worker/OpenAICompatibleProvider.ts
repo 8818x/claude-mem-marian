@@ -41,6 +41,7 @@ import {
   isAbortError,
   type WorkerRef
 } from './agents/index.js';
+import type { ResponseContext } from './agents/ResponseProcessor.js';
 
 /**
  * Normalized result returned by a concrete provider's `query()`.
@@ -506,6 +507,18 @@ export abstract class OpenAICompatibleProvider<TConfig extends { apiKey: string;
     return renderObservationPrompt(prompt);
   }
 
+  protected async processObservationResponse(
+    response: ProviderQueryResult, session: ActiveSession, worker: WorkerRef | undefined,
+    config: TConfig, originalTimestamp: number | null, lastCwd: string | undefined,
+    responseContext: ResponseContext,
+  ): Promise<void> {
+    await processAgentResponse(
+      response.content || '', session, this.dbManager, this.sessionManager,
+      worker, response.tokensUsed || 0, originalTimestamp, this.providerName, lastCwd,
+      response.servedModel ?? config.model, responseContext,
+    );
+  }
+
   private async processObservationMessage(
     session: ActiveSession,
     message: PendingMessageWithId,
@@ -581,7 +594,6 @@ export abstract class OpenAICompatibleProvider<TConfig extends { apiKey: string;
     // Both sides or nothing: a backend reporting only one of the two counts
     // must not produce a half-real event (input=0 → compression_ratio 0.0).
     session.lastUsage = this.buildLastUsage(obsResponse);
-    const tokensUsed = obsResponse.tokensUsed || 0;
     // Billed above either way; an aborted session's reply is not stored.
     if (this.rejectAbortedObservation) session.abortController.signal.throwIfAborted();
 
@@ -591,10 +603,7 @@ export abstract class OpenAICompatibleProvider<TConfig extends { apiKey: string;
     if (obsResponse.content || this.forwardEmptyMessageResponse) {
       // Scoped to this reply: processAgentResponse consumes and clears it.
       session.lastFinishReason = obsResponse.finishReason ?? null;
-      await processAgentResponse(
-        obsResponse.content || '', session, this.dbManager, this.sessionManager,
-        worker, tokensUsed, originalTimestamp, this.providerName, lastCwd, obsResponse.servedModel ?? config.model, responseContext
-      );
+      await this.processObservationResponse(obsResponse, session, worker, config, originalTimestamp, lastCwd, responseContext);
     } else {
       logger.warn('SDK', `Empty ${this.providerName} observation response, leaving queue intact`, {
         sessionId: session.sessionDbId

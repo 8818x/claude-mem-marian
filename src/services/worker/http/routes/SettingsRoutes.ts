@@ -258,6 +258,7 @@ export class SettingsRoutes extends BaseRouteHandler {
       'CLAUDE_MEM_OPENROUTER_API_KEYS',
       'CLAUDE_MEM_OPENROUTER_BASE_URL',
       'CLAUDE_MEM_OPENROUTER_MODEL',
+      'CLAUDE_MEM_OPENROUTER_OBSERVATION_BATCH_SIZE',
       'CLAUDE_MEM_OPENROUTER_SITE_URL',
       'CLAUDE_MEM_OPENROUTER_APP_NAME',
       // The openai-compatible endpoint, as the viewer edits it. Its key stays
@@ -551,6 +552,13 @@ export class SettingsRoutes extends BaseRouteHandler {
     if (settings.CLAUDE_MEM_CONTEXT_FULL_FIELD) {
       if (!['narrative', 'facts'].includes(settings.CLAUDE_MEM_CONTEXT_FULL_FIELD)) {
         return { valid: false, error: 'CLAUDE_MEM_CONTEXT_FULL_FIELD must be "narrative" or "facts"' };
+      }
+    }
+
+    if (settings.CLAUDE_MEM_OPENROUTER_OBSERVATION_BATCH_SIZE !== undefined) {
+      const size = Number(settings.CLAUDE_MEM_OPENROUTER_OBSERVATION_BATCH_SIZE);
+      if (!Number.isSafeInteger(size) || size < 1 || size > 32) {
+        return { valid: false, error: 'CLAUDE_MEM_OPENROUTER_OBSERVATION_BATCH_SIZE must be an integer between 1 and 32' };
       }
     }
 

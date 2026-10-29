@@ -2,6 +2,14 @@
 
 This file records changes maintained by the **claude-mem-marian** fork. Fork patches use their own names and tags; upstream version numbers describe the source baseline, not a Marian patch release.
 
+## Unreleased
+
+- Merge upstream `main` at `d7c2da3e5f9397b394dbc6b6966f4b261b489f7b` (v15.5.0), preserving the Marian batching, session identity, rejected-rule Undo and structured-refresh fixes.
+- Combine upstream's new focus/routing behavior with Marian's historical-session identities and structured story schema.
+- Rename the fork changelog to `MARIAN.md` and update the README links.
+- Add the edited claude-mem banner with the exact subtitle `Maria(n)-edition` to the README header.
+- Verification: **795 tests passed across 53 files**, **121 UI tests passed**, root/viewer typechecks, both lint checks and the full build passed. Whitespace checks for the Marian delta passed; the 12 inherited upstream whitespace warnings were preserved.
+
 ## Maria-1 — 2026-10-29
 
 First Marian patch set, based on upstream [claude-mem v15.3.0](https://github.com/thedotmack/claude-mem/tree/v15.3.0), commit `ae65368ae13b02effd68a77228c0f2e3497e05fe`.

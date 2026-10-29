@@ -1,15 +1,15 @@
 > [!NOTE]
-> Read [Marian.md](Marian.md) for this fork's patch history. The first patch is **Maria-1**.
+> Read [MARIAN.md](MARIAN.md) for this fork's patch history. The first patch is **Maria-1**.
 
 <p align="center">
-  <img src="docs/public/claude-mem-logomark.webp" width="80" alt="Upstream claude-mem logomark">
+  <img src="docs/public/marian-edition-logo.png" width="900" alt="claude-mem — Maria(n)-edition">
 </p>
 
 # Marian
 
 **Persistent agent memory with fewer OpenRouter requests and more reliable work tracking.**
 
-Marian is a fork of [claude-mem](https://github.com/thedotmack/claude-mem), based on upstream **v15.3.0**. It retains the existing memory format while improving observation batching, session-based agent identity, rejected-rule Undo, and automatic refresh.
+Marian is a fork of [claude-mem](https://github.com/thedotmack/claude-mem), based on upstream **v15.5.0**. It retains the existing memory format while improving observation batching, session-based agent identity, rejected-rule Undo, and automatic refresh.
 
 ## What Marian changes
 
@@ -52,11 +52,11 @@ See the [OpenRouter guide](docs/public/usage/openrouter-provider.mdx) and [confi
 
 ## Verification
 
-Maria-1 passed **667 relevant tests across 47 files**, **92 My Work UI tests**, root/viewer typechecks, both repository lint checks and the full build. See [the patch record](Marian.md#maria-1--2026-10-29) for scope and verification limits.
+Maria-1 passed **667 relevant tests across 47 files**, **92 My Work UI tests**, root/viewer typechecks, both repository lint checks and the full build. See [the patch record](MARIAN.md#maria-1--2026-10-29) for scope and verification limits.
 
 ## Compatibility
 
-Marian preserves existing databases and settings files. Anthropic/Claude, Codex, Gemini and other providers keep their existing observation behavior.
+Marian preserves existing databases and settings files. Anthropic/Claude, Codex, Gemini and other providers keep their upstream observation behavior.
 
 > [!IMPORTANT]
 > Codex refresh execution remains blocked when the Windows sandbox cannot enforce its restricted read profile. Marian reports that limitation and keeps the restriction in place. Claude completed the live refresh verification.

@@ -5,6 +5,8 @@ description: Group recent conversations into overall requests, review each one's
 
 # Request Progress
 
+> **Modified by the claude-mem-marian fork:** outcome field length limits match this fork's validator.
+
 My Work shows one card per **human request**, built from the human's own prompts: a conversation's first substantive ask owns its follow-ups, and agent work, activity and progress sit beneath it, even before any work is recorded. People rarely finish a goal in one conversation, though. They `/clear`, switch worktrees, hand off to Codex, come back the next day. This skill checks each new conversation's opening ask against the open requests in its project to join those conversations into one **overall request**, then reviews each request from memory and writes the build story.
 
 `${CLAUDE_SKILL_DIR}` is the folder holding this file. Every step runs one CLI:
@@ -88,7 +90,7 @@ Split the due groups into batches of about 8 and give each batch to a subagent, 
 >      - `usage`: `{level: in-use | some-use | no-evidence | unknown, text, evidence}`. Look for the owner or users coming back to it in later asks, observations of it running, analytics or logs the agents checked, issues filed against it.
 >      - `value`: `{level: high | medium | low | unclear, text, evidence}` for us: did later work build on it, did the owner praise, rely on or replace it, did it remove a cost or a chore.
 >      - `regressions` (≤10): `{text, at, fixedBy, evidence}` for anything it broke: later fix PRs or commits that name it, reverts, bug reports, the owner's corrections. `fixedBy` is null while unfixed.
->      - `changes` (≤12): `{what, why, at, evidence}` for each meaningful change, with the WHY from the owner's own ask (quote it), the commit or PR message, or the incident that caused it. Never write a why you cannot cite.
+>      - `changes` (≤12): `{what, why, at, evidence}` for each meaningful change. Keep `what` ≤200 chars and `why` ≤400 chars; `at` is an ISO date or null. Use the WHY from the owner's own ask (quote it), the commit or PR message, or the incident that caused it. Never write a why you cannot cite.
 >    - `preferences` (≤10): how the owner likes to work with agents, taken ONLY from the owner's own asks shown by `show`. Each has `preference` (≤200 chars, the statement), `quote` (verbatim, ≤300 chars), `kind` and `at`. `quote` is verbatim; `kind` is `directive` | `correction` | `praise` | `frustration`. Skip pasted agent text, secrets, keys and tokens.
 > 4. Record it: `<CLI> record-progress - <<'JSON' {...} JSON` with `groupId`, `state`, `percent`, the dates, `summary`, `narrative`, `milestones`, `outcome`, `preferences`, `evidence` and `reviewBasis` copied verbatim from that group's `show` output (it marks which conversations and activity you reviewed). Pass the JSON through the heredoc; never write review files to disk, because other reviewers run at the same time. Fix and retry if it rejects. A subtask finishing does not mean the request shipped.
 >

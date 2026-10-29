@@ -1,3 +1,4 @@
+// Modified by the Marian fork: preserve fail-closed diagnostics for unsupported Windows backends.
 import { afterEach, describe, expect, it } from 'bun:test';
 import { setFakeSpawn } from '../../helpers/fake-spawn.js';
 import { EventEmitter } from 'events';
@@ -105,6 +106,22 @@ describe('agent runner', () => {
       expect(calls[0].args.some(arg => arg.includes('":root"="deny"'))).toBe(true);
     } finally { rmSync(cwd, { recursive: true, force: true }); }
   });
+
+  for (const diagnostic of ['elevated Windows sandbox requires effective `:root` read access', 'native MXC is unavailable on this executor']) {
+    it(`keeps the restricted profile when ${diagnostic}`, async () => {
+      const cwd = mkdtempSync(join(tmpdir(), 'agent-runner-backend-'));
+      try {
+        const calls: SpawnCall[] = [];
+        const result = await runTask(task(cwd), { detect: async () => agents('codex'), query: neverQuery,
+          spawn: fakeSpawn(calls, call => { call.child.stderr.emit('data', diagnostic); call.child.emit('close', 1); }), buildEnv: env });
+        expect(result.state).toBe('failed');
+        expect(result.error).toContain('restricted read profile');
+        expect(calls).toHaveLength(1);
+        expect(calls[0].args.join(' ')).toContain('\":root\"=\"deny\"');
+        expect(calls[0].args.join(' ')).not.toMatch(/bypass|dangerous|full-auto|yolo/i);
+      } finally { rmSync(cwd, { recursive: true, force: true }); }
+    });
+  }
 
   it('uses Claude structured output instead of malformed result text when a schema is requested', async () => {
     const schema = { type: 'object', additionalProperties: false, properties: { ok: { type: 'boolean' } }, required: ['ok'] };

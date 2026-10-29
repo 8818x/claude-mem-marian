@@ -1,4 +1,8 @@
+// Modified by the Marian fork: expose existing review enums for the structured answer schema.
 export const LEDGER_DIR: string;
+export const PROGRESS_STATES: readonly ['shipped', 'in-progress', 'stalled', 'abandoned', 'unknown'];
+export const USAGE_LEVELS: readonly ['in-use', 'some-use', 'no-evidence', 'unknown'];
+export const VALUE_LEVELS: readonly ['high', 'medium', 'low', 'unclear'];
 export const PREFERENCE_KINDS: readonly ['directive', 'correction', 'praise', 'frustration'];
 export const GOALS_STALE_MS: number;
 export const AGENT_WRITTEN_PROMPTS_FILE: string;

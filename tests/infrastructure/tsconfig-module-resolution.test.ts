@@ -1,3 +1,4 @@
+// Modified by the claude-mem-marian fork for Claude Code/Codex-only distribution. Upstream attribution is retained.
 import { describe, it, expect } from 'bun:test';
 import { readFileSync } from 'fs';
 import path from 'path';
@@ -12,7 +13,7 @@ const projectRoot = path.resolve(__dirname, '../..');
 // breaks every fresh install (issue #3277).
 const REMOVED_MODULE_RESOLUTIONS = ['node', 'node10'];
 
-const TSCONFIG_PATHS = ['tsconfig.json', 'openclaw/tsconfig.json'];
+const TSCONFIG_PATHS = ['tsconfig.json'];
 
 describe('tsconfig moduleResolution', () => {
   for (const relPath of TSCONFIG_PATHS) {
@@ -23,8 +24,5 @@ describe('tsconfig moduleResolution', () => {
     });
   }
 
-  it('openclaw/tsconfig.json declares node types for the plugin build', () => {
-    const config = JSON.parse(readFileSync(path.join(projectRoot, 'openclaw/tsconfig.json'), 'utf-8'));
-    expect(config.compilerOptions?.types).toContain('node');
-  });
+
 });

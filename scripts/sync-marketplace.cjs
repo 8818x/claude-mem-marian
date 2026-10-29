@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Modified by the claude-mem-marian fork for Claude Code/Codex-only distribution. Upstream attribution is retained.
 
 const { execSync } = require('child_process');
 const { existsSync, readFileSync } = require('fs');
@@ -57,14 +58,6 @@ function getMarketplaceExcludes(rootDir) {
 function mirrorMarketplace(rootDir, installedPath) {
   const exclude = getMarketplaceExcludes(rootDir);
   const stats = mirrorDirectory(rootDir, installedPath, { exclude });
-  // These release bundles are generated under ignored directories. Sync only
-  // their explicit subtrees, keeping the rest of dist and ignored data excluded.
-  for (const relativePath of ['dist/pi-extension', 'dsh/lib']) {
-    const source = path.join(rootDir, relativePath);
-    if (!existsSync(source)) continue;
-    const bundle = mirrorDirectory(source, path.join(installedPath, relativePath), { exclude });
-    for (const key of ['copied', 'metadata', 'deleted']) stats[key] += bundle[key];
-  }
   return stats;
 }
 

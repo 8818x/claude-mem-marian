@@ -1,3 +1,4 @@
+// Modified by the claude-mem-marian fork for Claude Code/Codex-only distribution. Upstream attribution is retained.
 import { describe, it, expect } from 'bun:test';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -10,15 +11,8 @@ const marketplacePath = '.claude-plugin/marketplace.json';
 const rootVersionManifests = [
   '.claude-plugin/plugin.json',
   '.codex-plugin/plugin.json',
-  '.qoder-plugin/plugin.json',
-  '.grok-plugin/plugin.json',
-  'dsh/package.json',
-  'openclaw/openclaw.plugin.json',
   'plugin/.claude-plugin/plugin.json',
   'plugin/.codex-plugin/plugin.json',
-  'plugin/.qoder-plugin/plugin.json',
-  'claude-mem-cursor/.cursor-plugin/plugin.json',
-  'claude-mem-grok-bot/.cursor-plugin/plugin.json',
 ];
 
 describe('sync-plugin-manifests', () => {

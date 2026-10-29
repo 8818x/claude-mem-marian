@@ -1,3 +1,4 @@
+// Modified by the claude-mem-marian fork: public installer contracts cover maintained Claude/Codex hosts. Upstream attribution is retained.
 import { afterAll, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -226,7 +227,7 @@ describe('combined public installer runtime boundary', () => {
     expect(bootstrapCalls).toBe(0); expect(httpCalls).toBe(0); expect(taskBatches).toBe(1);
   });
   it('retains server setup for a supported host', async () => {
-    await expect(runInstallCommand({ ide: 'opencode', runtime: 'server-beta', provider: 'claude', serverUrl: 'http://127.0.0.1:37879' }))
+    await expect(runInstallCommand({ ide: 'claude-code', runtime: 'server-beta', provider: 'claude', serverUrl: 'http://127.0.0.1:37879' }))
       .rejects.toThrow('OWNED_TASK_BOUNDARY');
     const saved = JSON.parse(readFileSync(settingsPath, 'utf8'));
     expect(saved.env.CLAUDE_MEM_RUNTIME).toBe('server');
@@ -235,51 +236,9 @@ describe('combined public installer runtime boundary', () => {
     expect(bootstrapCalls).toBe(1); expect(httpCalls).toBe(0);
   });
 });
-describe.skipIf(process.platform === 'win32')('real Pi+DSH detection and public selection', () => {
-  it('detects both configured harness roots in detector order without Claude', async () => {
-    const detected = detectInstalledIDEs();
-    expect(detected.find(ide => ide.id === 'pi')?.detected).toBe(true);
-    expect(detected.find(ide => ide.id === 'dsh')?.detected).toBe(true);
-    expect(detected.find(ide => ide.id === 'claude-code')?.detected).toBe(false);
-    expect(initialIDESelection(detected).filter(id => id === 'pi' || id === 'dsh')).toEqual(['pi', 'dsh']);
-    await expect(runInstallCommand({ provider: 'claude' })).rejects.toThrow('EXIT_1');
-    expect(initialHosts).toContain('pi'); expect(initialHosts).toContain('dsh');
-    expect(initialHosts).not.toContain('claude-code');
-    expect(hostOffers).toBe(0); expectUnchangedServerBoundary();
-  });
-  for (const only of ['pi', 'dsh']) {
-    it('preselects the actual ' + only + '-only installation without offering Claude', async () => {
-      rmSync(only === 'pi' ? dshDir : piDir, { recursive: true, force: true });
-      selectedHosts = [only];
-      await expect(runInstallCommand({ provider: 'claude' })).rejects.toThrow('EXIT_1');
-      expect(initialHosts.filter(id => id === 'pi' || id === 'dsh')).toEqual([only]);
-      expect(initialHosts).not.toContain('claude-code');
-      expect(hostOffers).toBe(0); expectUnchangedServerBoundary();
-    });
-  }
-  it('keeps the no-agent Claude fallback and asks before installing the missing host', async () => {
-    rmSync(piDir, { recursive: true, force: true });
-    rmSync(dshDir, { recursive: true, force: true });
-    selectedHosts = ['claude-code']; runtimeChoice = 'worker';
-    await expect(runInstallCommand({ provider: 'claude' })).rejects.toThrow('OWNED_TASK_BOUNDARY');
-    expect(initialHosts).toEqual(['claude-code']);
-    expect(hostOffers).toBe(1); expect(httpCalls).toBe(0);
-  });
-  it('does not offer missing Claude when it was not selected', async () => {
-    selectedHosts = ['pi'];
-    await expect(runInstallCommand({ provider: 'claude' })).rejects.toThrow('EXIT_1');
-    expect(hostOffers).toBe(0);
-  });
-  it('offers missing Claude only when selected, without silently downloading it', async () => {
-    selectedHosts = ['claude-code', 'dsh'];
-    await expect(runInstallCommand({ provider: 'claude' })).rejects.toThrow('EXIT_1');
-    expect(hostOffers).toBe(1); expectUnchangedServerBoundary();
-  });
-  it('does not offer a Claude host already detected in the owned command PATH', async () => {
-    writeFileSync(join(bin, 'claude'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-    selectedHosts = ['claude-code', 'pi'];
-    await expect(runInstallCommand({ provider: 'claude' })).rejects.toThrow('EXIT_1');
-    expect(hostOffers).toBe(0); expect(initialHosts).toContain('claude-code');
+describe('maintained installation target detection', () => {
+  it('offers only Claude Code and Codex even when retired harness roots exist', () => {
+    expect(detectInstalledIDEs().map(ide => ide.id)).toEqual(['claude-code', 'codex-cli']);
   });
 });
 describe('combined public integration dispatch and partial summaries', () => {

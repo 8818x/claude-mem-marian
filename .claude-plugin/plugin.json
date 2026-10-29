@@ -1,7 +1,7 @@
 {
   "name": "claude-mem",
   "version": "15.5.0",
-  "description": "Memory compression system for Claude Code - persist context across sessions",
+  "description": "Modified by the Marian fork for Claude Code and Codex; persistent memory based on upstream claude-mem.",
   "author": {
     "name": "Alex Newman"
   },

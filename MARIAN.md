@@ -4,12 +4,23 @@ This file records changes maintained by the **claude-mem-marian** fork. Fork pat
 
 ## Unreleased
 
+- Default both web apps to Mocha before JavaScript mounts and when no valid theme is saved. Keep explicit flavor choices and legacy system preferences.
+- Document the fork's tested local-marketplace install path for Claude Code and Codex, including source builds, same-version cache updates and worker verification.
+- Request structured progress reviews with explicit per-field budgets. Keep the existing validator and retry only refused groups; regression coverage reproduces a 228-character change and preserves accepted reviews and evidence.
+- Retain restricted Windows filesystem/network permissions and classify unsupported elevated/MXC backends alongside the split-read refusal. Local CLI probes confirm none of the available native backends can enforce this refresh profile on this executor; no sandbox bypass is used.
+
+- Use `main` as the fork's working/default branch, preserving the complete Marian history.
+- Add Latte, Frappé, Macchiato and Mocha to My Work and Classic Viewer, using the official Catppuccin 1.8.0 palette and retained MIT notice. Both apps share persistent preferences and migrate old light/dark choices.
+- Add `REPOSITORY-GUIDE.md` and a full per-file inventory in `docs/repository-files.md`.
+- Theme verification: root/viewer typechecks, full build and both repository lint checks passed; 121 viewer/UI tests and 121 My Work tests passed. The existing Chrome helper skipped 65 browser tests on Windows. Playwright independently checked all four built themes in both apps, persisted reloads, legacy preferences, preview URLs and mobile presentation. My Work used sample fixtures; Classic Viewer API responses were stubbed. No installed-worker deployment was performed.
+
 - Maintain only Claude Code and Codex installation choices and distribution targets; retire other standalone client packages, their builders and dedicated setup assets/tests.
 - Retain original third-party license, NOTICE and provenance files in `docs/upstream-notices`, with upstream authorship preserved.
 - Document OpenRouter through the OpenAI-compatible route and its separate `CLAUDE_MEM_OPENAI_COMPAT_OBSERVATION_BATCH_SIZE` setting. LLM providers and shared memory/history handling are retained.
 - Add shared Claude/Codex instructions in `CLAUDE.md`, referenced by `AGENTS.md`, including the owner's Apache-2.0 compliance requirements.
 - Remove the fork's `SECURITY.md` at the owner's request.
 - Merge upstream `main` at `d7c2da3e5f9397b394dbc6b6966f4b261b489f7b` (v15.5.0), preserving the Marian batching, session identity, rejected-rule Undo and structured-refresh fixes.
+- Keep request-progress review outcome text within validator limits and select Codex's elevated Windows sandbox for the existing split read profile.
 - Combine upstream's new focus/routing behavior with Marian's historical-session identities and structured story schema.
 - Rename the fork changelog to `MARIAN.md` and update the README links.
 - Add the edited claude-mem banner with the exact subtitle `Maria(n)-edition` to the README header.

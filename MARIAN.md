@@ -4,6 +4,8 @@ This file records changes maintained by the **claude-mem-marian** fork. Fork pat
 
 ## Unreleased
 
+- Add shared Claude/Codex instructions in `CLAUDE.md`, referenced by `AGENTS.md`, including the owner's Apache-2.0 compliance requirements.
+- Remove the fork's `SECURITY.md` at the owner's request.
 - Merge upstream `main` at `d7c2da3e5f9397b394dbc6b6966f4b261b489f7b` (v15.5.0), preserving the Marian batching, session identity, rejected-rule Undo and structured-refresh fixes.
 - Combine upstream's new focus/routing behavior with Marian's historical-session identities and structured story schema.
 - Rename the fork changelog to `MARIAN.md` and update the README links.

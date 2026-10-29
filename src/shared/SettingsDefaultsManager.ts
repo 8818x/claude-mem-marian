@@ -206,6 +206,7 @@ export interface SettingsDefaults {
   CLAUDE_MEM_OPENROUTER_API_KEY: string;
   CLAUDE_MEM_OPENROUTER_API_KEYS: string;
   CLAUDE_MEM_OPENROUTER_MODEL: string;
+  CLAUDE_MEM_OPENROUTER_OBSERVATION_BATCH_SIZE: string;
   CLAUDE_MEM_OPENROUTER_BASE_URL: string;
   CLAUDE_MEM_OPENROUTER_TEMPERATURE: string;
   CLAUDE_MEM_OPENROUTER_SITE_URL: string;
@@ -482,6 +483,7 @@ export class SettingsDefaultsManager {
     // Changing it strands installs that were seeded with the old id: add that
     // id to RETIRED_OPENROUTER_DEFAULT_MODELS.
     CLAUDE_MEM_OPENROUTER_MODEL: 'cohere/north-mini-code:free',
+    CLAUDE_MEM_OPENROUTER_OBSERVATION_BATCH_SIZE: '8', // Pending events per request (1-32); 1 keeps individual requests.
     CLAUDE_MEM_OPENROUTER_BASE_URL: '',  // #2382/#2590/#2622/#2393 — optional OpenAI-compatible base URL (e.g. https://api.deepseek.com, http://localhost:1234/v1). Empty = default OpenRouter endpoint.
     CLAUDE_MEM_OPENROUTER_TEMPERATURE: '',
     CLAUDE_MEM_OPENROUTER_SITE_URL: '',  // Optional: for OpenRouter analytics

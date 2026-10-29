@@ -8,7 +8,7 @@ import { SettingsDefaultsManager } from '../../shared/SettingsDefaultsManager.js
 import { USER_SETTINGS_PATH } from '../../shared/paths.js';
 import { clearProFallbackOnGatewaySuccess, isCmemGatewayUrl, isKeyAllowedForEndpoint, keysForEndpoint } from '../../shared/cmem-gateway.js';
 import { logger } from '../../utils/logger.js';
-import type { ActiveSession, ConversationMessage } from '../worker-types.js';
+import type { ActiveSession, ConversationMessage, PendingMessageWithId } from '../worker-types.js';
 import { DatabaseManager } from './DatabaseManager.js';
 import { SessionManager } from './SessionManager.js';
 import { randomUUID } from 'crypto';
@@ -36,6 +36,7 @@ import {
   resolveContextWindowTokens,
   resolveObserverMaxOutputTokens,
   DEFAULT_OBSERVER_MAX_OUTPUT_TOKENS,
+  observationFieldMaxChars,
 } from './context-window.js';
 import { isContextOverflowObserverOutput } from '../../sdk/output-classifier.js';
 import {
@@ -50,6 +51,12 @@ import {
   startReasoningRetryDeadline,
 } from './reasoning-budget.js';
 import { namesPeriodRateLimit } from '../../shared/period-rate-limit.js';
+import { boundedInteger } from './CodexAppServerPool.js';
+import { observationMetadata } from './codex-observation-batch.js';
+import { buildObservationPromptParts, renderObservationPrompt, type ObservationPromptParts } from '../../sdk/prompts.js';
+import { parseOpenRouterObservationBatch } from './openrouter-observation-batch.js';
+import type { ResponseContext } from './agents/ResponseProcessor.js';
+import type { WorkerRef } from './agents/index.js';
 
 /**
  * OpenAI-compatible client configuration.
@@ -832,6 +839,95 @@ export class OpenRouterProvider extends OpenAICompatibleProvider<OpenRouterConfi
   protected readonly providerName = 'OpenRouter';
   protected readonly syntheticIdPrefix = 'openrouter';
   protected readonly forwardEmptyMessageResponse = true;
+  protected override readonly rejectAbortedObservation = true;
+
+  protected override handleSessionError(error: unknown, session: ActiveSession, worker?: WorkerRef): never {
+    if (session.claimedMessageIds.length && !session.abortReason) {
+      // The shared exit path preserves transport pauses; otherwise a storage
+      // exception or terminal HTTP error would finalize and dispose the buffer.
+      session.abortReason = 'transport:transient';
+      session.abortController.abort();
+    }
+    return super.handleSessionError(error, session, worker);
+  }
+
+  protected override observationTurnPrompt(session: ActiveSession, first: PendingMessageWithId, prompt: ObservationPromptParts): string {
+    const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
+    const count = boundedInteger(settings.CLAUDE_MEM_OPENROUTER_OBSERVATION_BATCH_SIZE, 8, 32);
+    const fieldMaxChars = observationFieldMaxChars(session.observerContextWindowTokens);
+    const items = [{ id: first._persistentId, metadata: observationMetadata(first), ...prompt }];
+    let chars = renderObservationPrompt(prompt).length;
+    for (let size = 1; size < count; size++) {
+      let parts: ObservationPromptParts | undefined;
+      const next = this.sessionManager.claimNextObservation(session.sessionDbId, candidate => {
+        // Leave fields needing the existing compression pass for the next turn.
+        if ([candidate.tool_input, candidate.tool_response].some(field =>
+          (JSON.stringify(field, null, 2) ?? '').length > fieldMaxChars)) return false;
+        parts = buildObservationPromptParts({ id: candidate._persistentId, tool_name: candidate.tool_name!,
+          tool_input: JSON.stringify(candidate.tool_input), tool_output: JSON.stringify(candidate.tool_response),
+          created_at_epoch: candidate._originalTimestamp, cwd: candidate.cwd }, fieldMaxChars);
+        const addition = JSON.stringify({ id: candidate._persistentId, metadata: observationMetadata(candidate), ...parts });
+        return chars + addition.length < Math.min(32_000, this.conversationMaxChars(session));
+      });
+      if (!next || !parts) break;
+      items.push({ id: next._persistentId, metadata: observationMetadata(next), ...parts });
+      chars += JSON.stringify(items[items.length - 1]).length;
+    }
+    if (items.length === 1) return renderObservationPrompt(prompt);
+    // Keep the normal XML instructions once; the envelope only adds attribution.
+    return `${observationMetadata(first)}Input ID: ${first._persistentId}\n${renderObservationPrompt(prompt)}\n\nBATCH OUTPUT CONTRACT (replaces the outer XML-only response rule):\n`
+      + 'Process every item independently, in input order. Never merge items. The first input is the event above, labeled Input ID. Additional inputs follow below.\n'
+      + 'Return ONLY a JSON object: {"results":[{"id":123,"xml":"<observation>...</observation>"}]}.\n'
+      + 'Include exactly one result per input ID, using its numeric id unchanged. Each xml value must contain the normal complete observation block(s), or <skip_summary reason="noise" />. Preserve every normal observation field. No summary or prose.\n'
+      + `ADDITIONAL BATCH INPUTS:\n${JSON.stringify(items.slice(1))}`;
+  }
+
+  protected override async processObservationResponse(
+    response: ProviderQueryResult, session: ActiveSession, worker: WorkerRef | undefined,
+    config: OpenRouterConfig, originalTimestamp: number | null, lastCwd: string | undefined,
+    context: ResponseContext,
+  ): Promise<void> {
+    const messages = this.sessionManager.getClaimedMessages(session.sessionDbId);
+    if (messages.length < 2) {
+      return super.processObservationResponse(response, session, worker, config, originalTimestamp, lastCwd, context);
+    }
+    const results = parseOpenRouterObservationBatch(response.content, messages.map(message => message._persistentId));
+    if (!results) {
+      logger.warn('PARSER', 'OpenRouter batch output incomplete or malformed; preserving every item for retry', {
+        sessionId: session.sessionDbId, claimedMessageIds: [...session.claimedMessageIds],
+      });
+      await this.sessionManager.resetProcessingToPending(session.sessionDbId);
+      session.abortReason = 'output_retry:openrouter_batch';
+      session.abortController.abort();
+      worker?.broadcastProcessingStatus?.();
+      return;
+    }
+    const historyLength = session.conversationHistory.length;
+    try {
+      for (const [index, message] of messages.entries()) {
+        session.abortController.signal.throwIfAborted();
+        // The existing processor persists and then confirms only this item's
+        // claim, including its own file evidence and tool-use provenance.
+        session.claimedMessageIds = [message._persistentId];
+        session.earliestPendingTimestamp = message._originalTimestamp;
+        await super.processObservationResponse({ ...response, content: results[index],
+          tokensUsed: index === 0 ? response.tokensUsed : 0 }, session, worker, config,
+        message._originalTimestamp, message.cwd, { ...context,
+          promptNumber: message.prompt_number ?? context.promptNumber,
+          pendingAgentId: message.agentId ?? null, pendingAgentType: message.agentType ?? null });
+      }
+    } finally {
+      // Confirmed items are already absent, so persistence/side-effect failure
+      // retries only the remaining items, never an already stored memory.
+      const remaining = this.sessionManager.getMessageBuffer().getMessagesByIds(
+        session.sessionDbId, messages.map(message => message._persistentId));
+      session.claimedMessageIds = remaining.map(message => message._persistentId);
+      session.earliestPendingTimestamp = remaining.length ? Math.min(...remaining.map(message => message._originalTimestamp)) : null;
+      session.conversationHistory.splice(historyLength);
+      session.conversationHistory.push({ role: 'assistant', content: response.content });
+    }
+  }
+
 
   constructor(dbManager: DatabaseManager, sessionManager: SessionManager) {
     super(dbManager, sessionManager);

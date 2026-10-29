@@ -1,3 +1,4 @@
+// Modified by the claude-mem-marian fork for Claude Code/Codex-only distribution. Upstream attribution is retained.
 import { describe, it, expect } from 'bun:test';
 import { existsSync, readdirSync } from 'fs';
 import { join } from 'path';
@@ -13,9 +14,7 @@ const PLUGIN_SKILLS_DIR = join(PROJECT_ROOT, 'plugin/skills');
 
 const MEM_SEARCH_COPIES = [
   'plugin/skills/mem-search/SKILL.md',
-  'claude-mem-cursor/skills/mem-search/SKILL.md',
   'cowork/skills/mem-search/SKILL.md',
-  'claude-mem-grok-bot/skills/mem-search/SKILL.md',
 ];
 
 function pluginSkillIdsOnDisk(): string[] {

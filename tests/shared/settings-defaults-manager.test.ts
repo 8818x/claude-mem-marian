@@ -1,3 +1,4 @@
+// Modified by the claude-mem-marian fork for Claude Code/Codex-only distribution. Upstream attribution is retained.
 
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync, statSync, chmodSync, symlinkSync } from 'fs';
@@ -571,18 +572,10 @@ describe('SettingsDefaultsManager', () => {
 
       // The retired id shipped in all three copies at once; a default changed in
       // one place only would leave the viewer or openclaw installs on a dead id.
-      it('keeps the viewer and openclaw installer copies of the default in sync', () => {
+      it('keeps the viewer copy of the default in sync', () => {
         expect(VIEWER_DEFAULT_SETTINGS.CLAUDE_MEM_OPENROUTER_MODEL).toBe(CURRENT);
-
-        const installer = readFileSync(new URL('../../openclaw/install.sh', import.meta.url), 'utf-8');
-        const installerModels = [
-          // settings defaults and the openrouter provider override
-          ...installer.matchAll(/CLAUDE_MEM_OPENROUTER_MODEL(?::| =) '([^']+)'/g),
-          // completion summary
-          ...installer.matchAll(/provider_display="OpenRouter \(([^)]+)\)"/g),
-        ].map((match) => match[1]);
-        expect(installerModels).toEqual([CURRENT, CURRENT, CURRENT]);
       });
+
 
       it.each([
         ['blank', { CLAUDE_MEM_OPENROUTER_BASE_URL: '' }],

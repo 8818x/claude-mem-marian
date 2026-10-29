@@ -1,3 +1,4 @@
+// Modified by the claude-mem-marian fork for Claude Code/Codex-only distribution. Upstream attribution is retained.
 import { describe, it, expect } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -8,12 +9,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '../..');
 const versionManifestFilenames = ['plugin.json', 'openclaw.plugin.json', 'package.json'];
 const nonNpmVersionManifests = [
-  '.grok-plugin/plugin.json',
-  'claude-mem-cursor/.cursor-plugin/plugin.json',
-  'claude-mem-grok-bot/.cursor-plugin/plugin.json',
 ];
 const independentVersionManifests = new Set([
-  'openclaw/package.json',
 ]);
 
 function readManifest(root: string, relativePath: string) {
@@ -70,12 +67,8 @@ describe('Version Consistency', () => {
     expect(discoverShippedVersionManifests()).toEqual([
       '.claude-plugin/plugin.json',
       '.codex-plugin/plugin.json',
-      '.qoder-plugin/plugin.json',
-      'dsh/package.json',
-      'openclaw/openclaw.plugin.json',
       'plugin/.claude-plugin/plugin.json',
       'plugin/.codex-plugin/plugin.json',
-      'plugin/.qoder-plugin/plugin.json',
       'plugin/package.json',
     ]);
   });
@@ -151,15 +144,11 @@ describe('Version Consistency', () => {
     });
   }
 
-  it('should list both cursor marketplace plugin sources', () => {
-    const marketplaceJsonPath = path.join(projectRoot, '.cursor-plugin', 'marketplace.json');
-    expect(existsSync(marketplaceJsonPath)).toBe(true);
-
-    const marketplaceJson = JSON.parse(readFileSync(marketplaceJsonPath, 'utf-8'));
-    expect(marketplaceJson.plugins.map((plugin: any) => plugin.name)).toEqual([
-      'claude-mem-cursor',
-      'claude-mem-grok-bot',
-    ]);
+  it('does not ship retired Cursor marketplace sources', () => {
+    expect(existsSync(path.join(projectRoot, '.cursor-plugin', 'marketplace.json'))).toBe(false);
+    const files = readManifest(projectRoot, 'package.json').files as string[];
+    expect(files).not.toContain('claude-mem-cursor');
+    expect(files).not.toContain('claude-mem-grok-bot');
   });
 
   for (const bundle of ['worker-service.cjs', 'mcp-server.cjs', 'server-service.cjs', 'transcript-watcher.cjs']) {

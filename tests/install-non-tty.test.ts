@@ -1,3 +1,4 @@
+// Modified by the claude-mem-marian fork for Claude Code/Codex-only distribution. Upstream attribution is retained.
 import { describe, it, expect } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -78,27 +79,27 @@ describe('Install Non-TTY Support', () => {
       expect(copyRegion).not.toContain("'.mcp.json'");
     });
 
-    it('copies the OMP hook to the marketplace directory the OMP installer reads (#3556)', () => {
+    it('does not ship retired OMP installer assets', () => {
       const copyRegion = installSource.slice(
         installSource.indexOf('const allowedTopLevelEntries = ['),
         installSource.indexOf('function copyPluginToCache'),
       );
       // OmpHooksInstaller resolves <marketplace>/omp/hooks/claude-mem.ts; shipping
       // omp/ in the npm package alone never puts it there.
-      expect(copyRegion).toContain("'omp'");
+      expect(copyRegion).not.toContain("'omp'");
       const packageJson = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
-      expect(packageJson.files).toContain('omp');
+      expect(packageJson.files).not.toContain('omp');
     });
 
-    it('copies the Hermes provider to the marketplace directory the Hermes installer reads', () => {
+    it('does not ship retired Hermes installer assets', () => {
       const copyRegion = installSource.slice(
         installSource.indexOf('const allowedTopLevelEntries = ['),
         installSource.indexOf('function copyPluginToCache'),
       );
       // HermesInstaller reads the durable marketplace, not the npm package.
-      expect(copyRegion).toContain("'hermes'");
+      expect(copyRegion).not.toContain("'hermes'");
       const packageJson = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
-      expect(packageJson.files).toContain('hermes');
+      expect(packageJson.files).not.toContain('hermes');
     });
 
     it('publishes the Claude marketplace root manifest in the npm package (#3424)', () => {

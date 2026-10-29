@@ -1,0 +1,189 @@
+{
+  ".qoder-plugin/plugin.json": [
+    "{\"author\": {\"name\": \"Alex Newman\", \"url\": \"https://github.com/thedotmack\"}, \"license\": \"Apache-2.0\", \"repository\": \"https://github.com/thedotmack/claude-mem\"}"
+  ],
+  "claude-mem-cursor/.cursor-plugin/plugin.json": [
+    "{\"author\": {\"name\": \"Alex Newman\"}, \"license\": \"Apache-2.0\", \"repository\": \"https://github.com/thedotmack/claude-mem\"}"
+  ],
+  "claude-mem-cursor/skills/agent-cost-report/scripts/acr/render.py": [
+    "                   + f'<br><span class=\"muted\">sources {esc(\", \".join(w.get(\"sources\") or []))} \u00b7 cost {cost} \u00b7 sessions {esc(\", \".join(w.get(\"sessions\") or []) or \"\u2014\")} \u00b7 tokens {tok_s} \u00b7 attribution {esc(d[\"wins\"].get(\"attribution_method\") or \"none\")} \u00b7 evidence {esc(\", \".join(map(str, w.get(\"evidence_ids\") or [])) or \"\u2014\")}</span></div>')"
+  ],
+  "claude-mem-cursor/skills/agent-cost-report/scripts/acr/wins.py": [
+    "ATTRIBUTION = \"Claude-Session commit trailers (R4); each turn assigned to the first linked win merged after it\"",
+    "    block = dict(items=out, cost_status=\"session_linked\" if linked else \"unmeasured\", attribution_method=ATTRIBUTION if linked else None,"
+  ],
+  "claude-mem-cursor/skills/agent-cost-report/scripts/tests/fixtures/report-1day.json": [
+    "  \"attribution_method\": null,"
+  ],
+  "claude-mem-cursor/skills/agent-cost-report/scripts/tests/fixtures/report-30day.json": [
+    "  \"attribution_method\": null,"
+  ],
+  "claude-mem-cursor/skills/agent-cost-report/scripts/tests/fixtures/report-7day.json": [
+    "  \"attribution_method\": null,"
+  ],
+  "claude-mem-cursor/skills/agent-cost-report/scripts/tests/fixtures/report-empty.json": [
+    "  \"attribution_method\": null,"
+  ],
+  "claude-mem-cursor/skills/agent-cost-report/scripts/tests/fixtures/report-session.json": [
+    "  \"attribution_method\": null,"
+  ],
+  "claude-mem-cursor/skills/agent-cost-report/scripts/tests/test_wins.py": [
+    "        self.assertIsNone(block[\"attribution_method\"]); self.assertIsNone(block[\"total_attributed_usd\"]); self.assertIsNone(block[\"unattributed_usd\"])"
+  ],
+  "claude-mem-grok-bot/.cursor-plugin/plugin.json": [
+    "{\"author\": {\"name\": \"Alex Newman\"}, \"license\": \"Apache-2.0\", \"repository\": \"https://github.com/thedotmack/claude-mem\"}"
+  ],
+  "claude-mem-grok-bot/skills/agent-cost-report/scripts/acr/render.py": [
+    "                   + f'<br><span class=\"muted\">sources {esc(\", \".join(w.get(\"sources\") or []))} \u00b7 cost {cost} \u00b7 sessions {esc(\", \".join(w.get(\"sessions\") or []) or \"\u2014\")} \u00b7 tokens {tok_s} \u00b7 attribution {esc(d[\"wins\"].get(\"attribution_method\") or \"none\")} \u00b7 evidence {esc(\", \".join(map(str, w.get(\"evidence_ids\") or [])) or \"\u2014\")}</span></div>')"
+  ],
+  "claude-mem-grok-bot/skills/agent-cost-report/scripts/acr/wins.py": [
+    "ATTRIBUTION = \"Claude-Session commit trailers (R4); each turn assigned to the first linked win merged after it\"",
+    "    block = dict(items=out, cost_status=\"session_linked\" if linked else \"unmeasured\", attribution_method=ATTRIBUTION if linked else None,"
+  ],
+  "claude-mem-grok-bot/skills/agent-cost-report/scripts/tests/fixtures/report-1day.json": [
+    "  \"attribution_method\": null,"
+  ],
+  "claude-mem-grok-bot/skills/agent-cost-report/scripts/tests/fixtures/report-30day.json": [
+    "  \"attribution_method\": null,"
+  ],
+  "claude-mem-grok-bot/skills/agent-cost-report/scripts/tests/fixtures/report-7day.json": [
+    "  \"attribution_method\": null,"
+  ],
+  "claude-mem-grok-bot/skills/agent-cost-report/scripts/tests/fixtures/report-empty.json": [
+    "  \"attribution_method\": null,"
+  ],
+  "claude-mem-grok-bot/skills/agent-cost-report/scripts/tests/fixtures/report-session.json": [
+    "  \"attribution_method\": null,"
+  ],
+  "claude-mem-grok-bot/skills/agent-cost-report/scripts/tests/test_wins.py": [
+    "        self.assertIsNone(block[\"attribution_method\"]); self.assertIsNone(block[\"total_attributed_usd\"]); self.assertIsNone(block[\"unattributed_usd\"])"
+  ],
+  "dsh/THIRD-PARTY-LICENSES.txt": [
+    "Copyright (c) 2021-present Shigma",
+    "The above copyright notice and this permission notice shall be included in all",
+    "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER",
+    "Copyright (c) 2021-present Shigma",
+    "The above copyright notice and this permission notice shall be included in all",
+    "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER",
+    "Copyright (c) 2021-present Shigma",
+    "The above copyright notice and this permission notice shall be included in all",
+    "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER",
+    "Copyright (c) 2026, DeepSeek",
+    "1. Redistributions of source code must retain the above copyright notice, this",
+    "2. Redistributions in binary form must reproduce the above copyright notice,",
+    "3. Neither the name of the copyright holder nor the names of its",
+    "THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\"",
+    "DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE",
+    "Copyright (c) 2026, DeepSeek",
+    "1. Redistributions of source code must retain the above copyright notice, this",
+    "2. Redistributions in binary form must reproduce the above copyright notice,",
+    "3. Neither the name of the copyright holder nor the names of its",
+    "THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\"",
+    "DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE",
+    "Copyright (c) 2026, DeepSeek",
+    "1. Redistributions of source code must retain the above copyright notice, this",
+    "2. Redistributions in binary form must reproduce the above copyright notice,",
+    "3. Neither the name of the copyright holder nor the names of its",
+    "THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\"",
+    "DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE",
+    "Copyright (c) 2026, DeepSeek",
+    "1. Redistributions of source code must retain the above copyright notice, this",
+    "2. Redistributions in binary form must reproduce the above copyright notice,",
+    "3. Neither the name of the copyright holder nor the names of its",
+    "THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\"",
+    "DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE",
+    "Copyright (c) 2026, DeepSeek",
+    "1. Redistributions of source code must retain the above copyright notice, this",
+    "2. Redistributions in binary form must reproduce the above copyright notice,",
+    "3. Neither the name of the copyright holder nor the names of its",
+    "THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\"",
+    "DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE"
+  ],
+  "dsh/package.json": [
+    "{\"license\": \"Apache-2.0\"}"
+  ],
+  "openclaw/openclaw.plugin.json": [
+    "{\"author\": \"thedotmack\", \"license\": \"Apache-2.0\"}"
+  ],
+  "openclaw/package.json": [
+    "{\"license\": \"Apache-2.0\"}"
+  ],
+  "openclaw/skills/agent-cost-report/scripts/acr/render.py": [
+    "                   + f'<br><span class=\"muted\">sources {esc(\", \".join(w.get(\"sources\") or []))} \u00b7 cost {cost} \u00b7 sessions {esc(\", \".join(w.get(\"sessions\") or []) or \"\u2014\")} \u00b7 tokens {tok_s} \u00b7 attribution {esc(d[\"wins\"].get(\"attribution_method\") or \"none\")} \u00b7 evidence {esc(\", \".join(map(str, w.get(\"evidence_ids\") or [])) or \"\u2014\")}</span></div>')"
+  ],
+  "openclaw/skills/agent-cost-report/scripts/acr/wins.py": [
+    "ATTRIBUTION = \"Claude-Session commit trailers (R4); each turn assigned to the first linked win merged after it\"",
+    "    block = dict(items=out, cost_status=\"session_linked\" if linked else \"unmeasured\", attribution_method=ATTRIBUTION if linked else None,"
+  ],
+  "openclaw/skills/agent-cost-report/scripts/tests/fixtures/report-1day.json": [
+    "  \"attribution_method\": null,"
+  ],
+  "openclaw/skills/agent-cost-report/scripts/tests/fixtures/report-30day.json": [
+    "  \"attribution_method\": null,"
+  ],
+  "openclaw/skills/agent-cost-report/scripts/tests/fixtures/report-7day.json": [
+    "  \"attribution_method\": null,"
+  ],
+  "openclaw/skills/agent-cost-report/scripts/tests/fixtures/report-empty.json": [
+    "  \"attribution_method\": null,"
+  ],
+  "openclaw/skills/agent-cost-report/scripts/tests/fixtures/report-session.json": [
+    "  \"attribution_method\": null,"
+  ],
+  "openclaw/skills/agent-cost-report/scripts/tests/test_wins.py": [
+    "        self.assertIsNone(block[\"attribution_method\"]); self.assertIsNone(block[\"total_attributed_usd\"]); self.assertIsNone(block[\"unattributed_usd\"])"
+  ],
+  "pi/THIRD-PARTY-LICENSE.txt": [
+    "Copyright (c) 2026 Husni Adil Makmur",
+    "The above copyright notice and this permission notice shall be included in all",
+    "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER"
+  ],
+  "pi/TYPEBOX-LICENSE.txt": [
+    "Copyright (c) 2017-2026 Haydn Paterson",
+    "The above copyright notice and this permission notice shall be included in",
+    "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER"
+  ],
+  "pi/TYPEBOX-PROVENANCE.json": [
+    "  \"schema\": \"claude-mem.pi.typebox-attribution.v1\","
+  ],
+  "plugin/.qoder-plugin/plugin.json": [
+    "{\"author\": {\"name\": \"Alex Newman\", \"url\": \"https://github.com/thedotmack\"}, \"license\": \"Apache-2.0\", \"repository\": \"https://github.com/thedotmack/claude-mem\"}"
+  ],
+  "scripts/harness-plugin-build-options.js": [
+    "// Modified by the claude-mem-marian fork for Claude Code/Codex-only distribution. Upstream attribution is retained.",
+    "  banner: { js: '/*! Pi memory design and text extraction: Copyright (c) 2026 Husni Adil Makmur. MIT: LICENSE.txt. Claude-Mem Apache-2.0: CLAUDE-MEM-LICENSE.txt and CLAUDE-MEM-NOTICE.txt. Bundled TypeBox MIT: TYPEBOX-LICENSE.txt and TYPEBOX-PROVENANCE.json. All files are beside this extension. */' },",
+    "  const attributionFiles = [",
+    "  const expected = JSON.parse(attributionFiles.find(file => file.name === 'TYPEBOX-PROVENANCE.json').contents.toString('utf8'));",
+    "  const expectedLicense = attributionFiles.find(file => file.name === 'TYPEBOX-LICENSE.txt').contents;",
+    "    throw new Error('Resolved TypeBox does not match the pinned Pi attribution. Update the dependency pin and full notice together before building.');",
+    "  return { options: { ...PI_EXTENSION_BUILD_OPTIONS, alias: { typebox: entry } }, attributionFiles };",
+    "export function preflightDshAttribution(root = SOURCE_ROOT) {"
+  ],
+  "src/integrations/pi-extension/index.ts": [
+    " * design in husniadil/pi-mem (MIT, copyright 2026 Husni Adil Makmur)."
+  ],
+  "tests/integration/harness-installers.test.ts": [
+    "// Modified by the claude-mem-marian fork for Claude Code/Codex-only distribution. Upstream attribution is retained.",
+    "import { readProjectAttribution, replaceOwnedFiles } from '../../src/shared/owned-file-install.js';",
+    "  const attribution = [",
+    "  for (const [name, source] of attribution) writeFileSync(join(bundleDir, name), readFileSync(join(checkout, source)));",
+    "  it('installs complete Pi attribution twice and uninstalls only its seven owned files', () => {",
+    "    replaceOwnedFiles(target, readProjectAttribution(process.cwd()));",
+    "    replaceOwnedFiles(target, readProjectAttribution(process.cwd()));",
+    "    expect(() => replaceOwnedFiles(target, readProjectAttribution(source))).toThrow();",
+    "  it('keeps complete DSH project attribution and all bundled license texts in the local package', () => {",
+    "    expect(license).toContain('Copyright 2026 Bleed00');"
+  ],
+  "tests/integrations/harness-bundles-contract.test.ts": [
+    "// Modified by the claude-mem-marian fork for Claude Code/Codex-only distribution. Upstream attribution is retained.",
+    "import { preparePiExtensionBuild, preflightDshAttribution, DSH_PLUGIN_BUILD_OPTIONS } from '../../scripts/harness-plugin-build-options.js';",
+    "      for (const attribution of prepared.attributionFiles) writeFileSync(join(dir, attribution.name), attribution.contents);",
+    "  it('refuses absent Pi attribution before build output is created', () => {",
+    "    const dir = mkdtempSync(join(tmpdir(), 'cmem-pi-attribution-missing-'));",
+    "    const dir = mkdtempSync(join(tmpdir(), 'cmem-pi-attribution-drift-'));",
+    "      preflightDshAttribution();"
+  ],
+  "tests/integrations/opencode-plugin-contract.test.ts": [
+    "describe(\"OpenCode plugin attribution contract\", () => {"
+  ]
+}

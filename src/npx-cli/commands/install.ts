@@ -1,3 +1,4 @@
+// Modified by the claude-mem-marian fork for Claude Code/Codex-only distribution. Upstream attribution is retained.
 import * as p from '@clack/prompts';
 import { styleText } from 'node:util';
 import { randomUUID } from 'crypto';
@@ -753,16 +754,8 @@ function copyPluginToMarketplace(): void {
     '.agents',
     '.claude-plugin',
     '.codex-plugin',
-    '.cursor-plugin',
-    'claude-mem-cursor',
-    'claude-mem-grok-bot',
     'plugin',
     'package-lock.json',
-    'openclaw',
-    'omp',
-    'hermes',
-    'pi',
-    'dsh',
     'dist',
     'README.md',
     'CHANGELOG.md',

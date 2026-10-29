@@ -1,10 +1,10 @@
+# Modified by the claude-mem-marian fork for Claude Code/Codex-only distribution. Upstream attribution is retained.
 name: Deploy Install Scripts
 
 on:
   push:
     branches: [main]
     paths:
-      - 'openclaw/install.sh'
       - 'install/**'
   workflow_dispatch:
 
@@ -17,7 +17,6 @@ jobs:
       - name: Copy install scripts to deploy directory
         run: |
           mkdir -p install/public
-          cp openclaw/install.sh install/public/openclaw.sh
 
       - name: Deploy to Vercel
         uses: amondnet/vercel-action@v25

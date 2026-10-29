@@ -4,13 +4,16 @@ This file records changes maintained by the **claude-mem-marian** fork. Fork pat
 
 ## Unreleased
 
+- Maintain only Claude Code and Codex installation choices and distribution targets; retire other standalone client packages, their builders and dedicated setup assets/tests.
+- Retain original third-party license, NOTICE and provenance files in `docs/upstream-notices`, with upstream authorship preserved.
+- Document OpenRouter through the OpenAI-compatible route and its separate `CLAUDE_MEM_OPENAI_COMPAT_OBSERVATION_BATCH_SIZE` setting. LLM providers and shared memory/history handling are retained.
 - Add shared Claude/Codex instructions in `CLAUDE.md`, referenced by `AGENTS.md`, including the owner's Apache-2.0 compliance requirements.
 - Remove the fork's `SECURITY.md` at the owner's request.
 - Merge upstream `main` at `d7c2da3e5f9397b394dbc6b6966f4b261b489f7b` (v15.5.0), preserving the Marian batching, session identity, rejected-rule Undo and structured-refresh fixes.
 - Combine upstream's new focus/routing behavior with Marian's historical-session identities and structured story schema.
 - Rename the fork changelog to `MARIAN.md` and update the README links.
 - Add the edited claude-mem banner with the exact subtitle `Maria(n)-edition` to the README header.
-- Verification: **795 tests passed across 53 files**, **121 UI tests passed**, root/viewer typechecks, both lint checks and the full build passed. Whitespace checks for the Marian delta passed; the 12 inherited upstream whitespace warnings were preserved.
+- Verification after client retirement: **961 tests passed across 67 files**, **121 UI tests passed**, root/viewer typechecks, both lint checks and the full build passed. A real npm packaging dry run contains no retired client files; Claude/Codex assets and retained notices are included. Seven original license/NOTICE/provenance files are preserved byte-for-byte, and root LICENSE/NOTICE are unchanged.
 
 ## Maria-1 — 2026-10-29
 

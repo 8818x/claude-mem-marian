@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Modified by the claude-mem-marian fork for Claude Code/Codex-only distribution. Upstream attribution is retained.
 
 import { build } from 'esbuild';
 import fs from 'fs';
@@ -7,8 +8,6 @@ import vm from 'node:vm';
 import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'url';
 import { allowScriptsMap } from './postinstall-allowlist.js';
-import { OPENCODE_PLUGIN_BUILD_OPTIONS } from './opencode-plugin-build-options.js';
-import { preparePiExtensionBuild, preflightDshAttribution, DSH_PLUGIN_BUILD_OPTIONS } from './harness-plugin-build-options.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -456,8 +455,6 @@ async function buildHooks() {
   console.log('🔨 Building claude-mem hooks and worker service...\n');
 
   try {
-    const piBuild = preparePiExtensionBuild();
-    preflightDshAttribution();
     const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
     const version = packageJson.version;
     console.log(`📌 Version: ${version}`);
@@ -1056,57 +1053,6 @@ async function buildHooks() {
     const bugReportStats = fs.statSync(`${bugReportOutDir}/index.js`);
     console.log(`✓ bug-report built (${(bugReportStats.size / 1024).toFixed(2)} KB)`);
 
-    if (fs.existsSync('openclaw/src/index.ts')) {
-      console.log(`\n🔧 Building OpenClaw plugin...`);
-      const openclawOutDir = 'openclaw/dist';
-      if (!fs.existsSync(openclawOutDir)) {
-        fs.mkdirSync(openclawOutDir, { recursive: true });
-      }
-      await build({
-        entryPoints: ['openclaw/src/index.ts'],
-        bundle: true,
-        platform: 'node',
-        target: 'node18',
-        format: 'esm',
-        outfile: `${openclawOutDir}/index.js`,
-        minify: true,
-        logLevel: 'error',
-        external: [
-          'fs', 'fs/promises', 'path', 'os', 'child_process', 'url',
-          'crypto', 'http', 'https', 'net', 'stream', 'util', 'events',
-        ],
-      });
-
-      const openclawStats = fs.statSync(`${openclawOutDir}/index.js`);
-      console.log(`✓ openclaw plugin built (${(openclawStats.size / 1024).toFixed(2)} KB)`);
-    }
-
-    if (fs.existsSync('src/integrations/opencode-plugin/index.ts')) {
-      console.log(`\n🔧 Building OpenCode plugin...`);
-      const opencodeOutDir = 'dist/opencode-plugin';
-      if (!fs.existsSync(opencodeOutDir)) {
-        fs.mkdirSync(opencodeOutDir, { recursive: true });
-      }
-      await build({
-        ...OPENCODE_PLUGIN_BUILD_OPTIONS,
-        outfile: `${opencodeOutDir}/index.js`,
-      });
-
-      const opencodeStats = fs.statSync(`${opencodeOutDir}/index.js`);
-      console.log(`✓ opencode plugin built (${(opencodeStats.size / 1024).toFixed(2)} KB)`);
-    }
-
-    fs.mkdirSync('dist/pi-extension', { recursive: true });
-    await build({ ...piBuild.options, outfile: 'dist/pi-extension/index.js' });
-    for (const file of piBuild.attributionFiles) fs.writeFileSync(path.join('dist/pi-extension', file.name), file.contents);
-    console.log('✓ Pi memory extension built');
-    fs.mkdirSync('dsh/lib', { recursive: true });
-    const dshManifest = JSON.parse(fs.readFileSync('dsh/package.json', 'utf8'));
-    dshManifest.version = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
-    fs.writeFileSync('dsh/package.json', JSON.stringify(dshManifest, null, 2) + '\n');
-    await build({ ...DSH_PLUGIN_BUILD_OPTIONS, outfile: 'dsh/lib/index.js' });
-    console.log('✓ DeepSeek Harness memory plugin built');
-
     console.log('\n📋 Copying onboarding explainer to plugin tree...');
     const onboardingExplainerSrc = 'src/services/worker/onboarding-explainer.md';
     const onboardingExplainerDst = 'plugin/skills/how-it-works/onboarding-explainer.md';
@@ -1138,8 +1084,6 @@ async function buildHooks() {
       'plugin/skills/how-it-works/onboarding-explainer.md',
       'plugin/hooks/hooks.json',
       'plugin/hooks/codex-hooks.json',
-      'plugin/hooks/qoder-hooks.json',
-      'plugin/hooks/qoder-repo-hooks.json',
       'plugin/scripts/bun-runner.js',
       'plugin/scripts/context-read-worker.cjs',
       'plugin/scripts/context-read-worker.cjs.map',
@@ -1147,12 +1091,8 @@ async function buildHooks() {
       'plugin/sqlite/observations/files.js',
       'plugin/.claude-plugin/plugin.json',
       'plugin/.codex-plugin/plugin.json',
-      'plugin/.qoder-plugin/plugin.json',
-      'plugin/qoder.mcp.json',
-      'plugin/scripts/qoder-hook-launcher.cjs',
       'plugin/.mcp.json',
       '.codex-plugin/plugin.json',
-      '.qoder-plugin/plugin.json',
       '.agents/plugins/marketplace.json',
       'dist/bug-report/index.js',
     ];

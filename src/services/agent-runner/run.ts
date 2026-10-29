@@ -26,7 +26,7 @@
  */
 
 import { randomBytes } from 'crypto';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, isAbsolute, join, relative, resolve } from 'path';
 import { query, type CanUseTool, type Options, type SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
@@ -47,7 +47,7 @@ export type StepModels = Partial<Record<UsableAgentId, StepModel>>;
 export type AnswerSchema = Record<string, unknown>;
 
 /** Ask a read-only agent one prompt, on the step's model, and get its final answer text.
- * With `answerSchema`, an agent CLI that supports structured output (Codex) must answer in that shape. */
+ * With `answerSchema`, agents that support structured output must answer in that shape. */
 export type AskAgent = (prompt: string, models: StepModels, answerSchema?: AnswerSchema) => Promise<string>;
 
 export interface ClaudeCodeTaskOptions {
@@ -135,6 +135,10 @@ export function fileToolStaysInside(toolName: string, input: Record<string, unkn
 /** One Agent SDK query per step, with read-only tools only. */
 function claudeCodeAsk(agent: UsableAgent, task: AgentTask, dependencies: AgentRunnerDependencies): AskAgent {
   const { claudeCode } = task;
+  // The official npm Windows shim forwards to this native binary; JSON schema
+  // arguments must reach it directly instead of being interpreted by cmd.exe.
+  const npmNative = join(dirname(agent.path!), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
+  const executable = process.platform === 'win32' && /(?:^|[\\/])claude(?:\.(?:cmd|bat))?$/i.test(agent.path!) && existsSync(npmNative) ? npmNative : agent.path!;
   const canUseTool: CanUseTool = async (toolName, input) => {
     if (FILE_TOOLS.includes(toolName) && fileToolStaysInside(toolName, input, task.cwd, claudeCode.readableFolders)) {
       return { behavior: 'allow', updatedInput: input };
@@ -142,11 +146,11 @@ function claudeCodeAsk(agent: UsableAgent, task: AgentTask, dependencies: AgentR
     logger.warn('WORKER', `Agent run (${task.reason}) was refused ${toolName}`);
     return { behavior: 'deny', message: `${toolName} is not available to this read-only step.` };
   };
-  return async (prompt, models) => {
+  return async (prompt, models, answerSchema) => {
     const env = await dependencies.buildEnv();
     let stderr = '';
     const options: Options = {
-      pathToClaudeCodeExecutable: agent.path!,
+      pathToClaudeCodeExecutable: executable,
       model: models['claude-code']?.model,
       cwd: task.cwd,
       env,
@@ -157,9 +161,10 @@ function claudeCodeAsk(agent: UsableAgent, task: AgentTask, dependencies: AgentR
       allowedTools: claudeCode.allowedTools,
       permissionMode: 'default',
       canUseTool,
+      ...(answerSchema ? { outputFormat: { type: 'json_schema' as const, schema: answerSchema } } : {}),
       stderr: data => { stderr = (stderr + data).slice(-4000); },
     };
-    type FinalResult = { is_error?: boolean; subtype?: string; result?: string };
+    type FinalResult = { is_error?: boolean; subtype?: string; result?: string; structured_output?: unknown };
     let final = null as FinalResult | null;
     try {
       for await (const message of dependencies.query({ prompt, options })) {
@@ -170,6 +175,10 @@ function claudeCodeAsk(agent: UsableAgent, task: AgentTask, dependencies: AgentR
     }
     if (!final) throw new Error('Claude Code ended without a result.');
     if (final.is_error || final.subtype !== 'success') throw new Error(`Claude Code run failed (${final.subtype ?? 'error'}): ${String(final.result ?? '').slice(0, 500)}`);
+    if (answerSchema) {
+      if (final.structured_output == null) throw new Error('Claude Code ended without the requested structured output.');
+      return JSON.stringify(final.structured_output);
+    }
     return String(final.result ?? '');
   };
 }
@@ -187,6 +196,9 @@ async function runCli(
 }
 
 function failure(name: string, result: CommandResult): Error {
+  if (name === 'codex exec' && /cannot enforce split filesystem read restrictions|Restricted read-only access requires|requires effective `:root` read access/.test(result.stderr)) {
+    return new Error('Codex cannot enforce this refresh task\'s restricted read profile with the current Windows sandbox. Execution remains blocked; use a supported sandbox or another logged-in agent.');
+  }
   const detail = `${result.stderr}\n${result.stdout}`.trim().split('\n').filter(Boolean).slice(-3).join(' ').slice(0, 500);
   return new Error(`${name} exited ${result.exitCode}${detail ? `: ${detail}` : ''}`);
 }

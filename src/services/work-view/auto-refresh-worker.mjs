@@ -60,7 +60,7 @@ export class AutoRefreshWorker {
     // Another live worker process owns a run in progress.
     if (previous?.state === 'running' && previous.pid !== process.pid && previous.pid && processIsAlive(previous.pid)) return 'running';
     const needs = this.readNeeds();
-    if (!needs.needed) {
+    if (!needs.needed && previous?.state !== 'failed') {
       // A run this worker never finished was cut off by a restart.
       const interrupted = previous?.state === 'running';
       this.write({ ...previous, state: interrupted ? 'failed' : previous?.state ?? 'idle', ...(interrupted ? { error: 'The previous refresh stopped before finishing.' } : {}), checkedAt: this.iso(), nextAt: this.iso(this.now() + this.checkMs), needs });
@@ -74,8 +74,8 @@ export class AutoRefreshWorker {
     if (this.closed) return 'closed';
     if (this.busy) return 'running';
     const needs = this.readNeeds();
-    // A re-scan that found nothing new starts no agent.
-    if (!needs.needed) return 'idle';
+    // A failed final step can remain unfinished after earlier steps cleared the due work.
+    if (!needs.needed && this.status()?.state !== 'failed') return 'idle';
     return this.run(needs, reason);
   }
 

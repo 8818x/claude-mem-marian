@@ -67,6 +67,73 @@ const neverQuery = (() => { throw new Error('query must not run'); }) as never;
 const env = async () => ({ PATH: '/bin', CLAUDE_MEM_INTERNAL: '1' });
 
 describe('agent runner', () => {
+  it.skipIf(process.platform !== 'win32')('uses the official npm native binary for schema arguments instead of cmd.exe', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'agent-runner-native-'));
+    try {
+      const shim = join(cwd, 'claude.cmd');
+      const native = join(cwd, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
+      mkdirSync(join(cwd, 'node_modules', '@anthropic-ai', 'claude-code', 'bin'), { recursive: true });
+      writeFileSync(shim, '@echo off'); writeFileSync(native, 'test binary path only');
+      const seen: any[] = [];
+      const query = ((input: any) => { seen.push(input); return (async function* () {
+        yield { type: 'result', subtype: 'success', result: 'ok' };
+      })(); }) as never;
+      for (const path of [shim, join(cwd, 'claude')]) {
+        const result = await runTask(task(cwd), { detect: async () => [{ id: 'claude-code', path, authenticated: true, reason: 'test' }],
+          query, spawn: fakeSpawn([], () => {}), buildEnv: env });
+        expect(result.state).toBe('ok');
+      }
+      expect(seen.map(input => input.options.pathToClaudeCodeExecutable)).toEqual([native, native]);
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
+  });
+
+  it('prioritizes the sandbox restriction over a models-cache warning without broadening permissions', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'agent-runner-sandbox-'));
+    try {
+      const calls: SpawnCall[] = [];
+      const result = await runTask(task(cwd), { detect: async () => agents('codex'), query: neverQuery,
+        spawn: fakeSpawn(calls, call => {
+          call.child.stderr.emit('data', 'failed to load models cache: trailing characters\nfailed to prepare windows sandbox wrapper: windows unelevated restricted-token sandbox cannot enforce split filesystem read restrictions directly');
+          call.child.emit('close', 1);
+        }), buildEnv: env });
+      expect(result.state).toBe('failed');
+      expect(result.error).toContain('restricted read profile');
+      expect(result.error).not.toContain('models cache');
+      expect(calls[0].args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+      expect(calls[0].args.some(arg => arg.includes('":root"="deny"'))).toBe(true);
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
+  });
+
+  it('uses Claude structured output instead of malformed result text when a schema is requested', async () => {
+    const schema = { type: 'object', additionalProperties: false, properties: { ok: { type: 'boolean' } }, required: ['ok'] };
+    const seen: any[] = [];
+    const query = ((input: any) => {
+      seen.push(input);
+      return (async function* () { yield { type: 'result', subtype: 'success', is_error: false,
+        result: 'only the trailing fragment of the answer', structured_output: { ok: true } }; })();
+    }) as never;
+    const structuredTask = { ...task('/data'), run: async (ask: Parameters<AgentTask['run']>[0]) => ask('Return JSON', {}, schema) };
+    const result = await runTask(structuredTask, { detect: async () => agents('claude-code'), query,
+      spawn: fakeSpawn([], () => {}), buildEnv: env });
+    expect(result.state).toBe('ok');
+    expect(result.result).toBe('{"ok":true}');
+    expect(seen[0].options.outputFormat).toEqual({ type: 'json_schema', schema });
+    expect(seen[0].options.permissionMode).toBe('default');
+  });
+
+  for (const structured_output of [undefined, null]) {
+    it(`refuses a schema-requested Claude success without structured output (${structured_output})`, async () => {
+      const query = (() => (async function* () { yield { type: 'result', subtype: 'success', is_error: false,
+        result: '{"ok":true}', structured_output }; })()) as never;
+      const structuredTask = { ...task('/data'), run: async (ask: Parameters<AgentTask['run']>[0]) => ask('Return JSON', {}, { type: 'object' }) };
+      const result = await runTask(structuredTask, { detect: async () => agents('claude-code'), query,
+        spawn: fakeSpawn([], () => {}), buildEnv: env });
+      expect(result.state).toBe('failed');
+      expect(result.error).toContain('structured output');
+      expect(result.result).toBeNull();
+    });
+  }
+
   it('Claude Code reads only inside the task\'s readable folders: never the data dir\'s .env, even through a link', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'agent-runner-read-'));
     try {
@@ -74,7 +141,8 @@ describe('agent runner', () => {
       mkdirSync(ledger);
       writeFileSync(join(dataDir, '.env'), 'ANTHROPIC_API_KEY=secret');
       writeFileSync(join(ledger, 'show.json'), '{}');
-      symlinkSync(join(dataDir, '.env'), join(ledger, 'env-link'));
+      // Junctions exercise the same real-path escape on Windows without requiring symlink privileges.
+      symlinkSync(process.platform === 'win32' ? dataDir : join(dataDir, '.env'), join(ledger, 'env-link'), process.platform === 'win32' ? 'junction' : 'file');
       const seen: any[] = [];
       const query = ((input: any) => { seen.push(input); return (async function* () { yield { type: 'result', subtype: 'success', is_error: false, result: 'ok' }; })(); }) as never;
       const readTask: AgentTask = { ...task(ledger), claudeCode: { plugins: [], tools: ['Read', 'Grep', 'Glob'], allowedTools: [], readableFolders: [ledger] } };

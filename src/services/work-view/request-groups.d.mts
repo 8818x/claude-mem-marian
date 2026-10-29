@@ -1,4 +1,5 @@
 export const LEDGER_DIR: string;
+export const PREFERENCE_KINDS: readonly ['directive', 'correction', 'praise', 'frustration'];
 export const GOALS_STALE_MS: number;
 export const AGENT_WRITTEN_PROMPTS_FILE: string;
 export interface RefreshNeeds { due: number; ungrouped: number; goalsStale: boolean; unaligned: number; needed: boolean }

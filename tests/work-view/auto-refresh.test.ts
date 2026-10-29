@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AutoRefreshWorker } from '../../src/services/work-view/auto-refresh-worker.mjs';
-import { buildRefreshTask, GROUPING_ANSWER_SCHEMA, STEP_MODELS } from '../../src/services/work-view/refresh-task.js';
+import { buildRefreshTask, GROUPING_ANSWER_SCHEMA, STORY_ANSWER_SCHEMA, STEP_MODELS } from '../../src/services/work-view/refresh-task.js';
 import { readLedger, runCli } from '../../src/services/work-view/request-groups.mjs';
 
 const DAY = 86400000, NOW = 100 * DAY;
@@ -42,6 +42,26 @@ function deferred<T>() {
 }
 
 describe('automatic refresh scheduler', () => {
+  it.each(['scheduled', 'manual'])('retries a failed final step with no other work due (%s)', async (mode) => {
+    const dir = mkdtempSync(join(tmpdir(), 'auto-refresh-'));
+    const database = fixtureDatabase();
+    try {
+      saveGoals(database, new Date(NOW).toISOString());
+      writeFileSync(join(dir, 'request-groups.json'), JSON.stringify({ version: 1, conversations: {}, groups: {}, ignored: { [key('a')]: 'not a goal' } }));
+      writeFileSync(join(dir, 'refresh.json'), JSON.stringify({ state: 'failed', error: 'story: malformed JSON' }));
+      let runs = 0;
+      const worker = new AutoRefreshWorker({ dir, openDatabase: handle(database), now: () => NOW, runJob: async () => {
+        runs++;
+        return { state: 'ok', agent: 'claude-code', result: 'Story updated.', error: null };
+      } });
+      expect(await (mode === 'scheduled' ? worker.check() : worker.runNow({ reason: 'setup-scan' }))).toBe('ok');
+      expect(worker.status()).toMatchObject({ state: 'ok', error: null, needs: { needed: false } });
+      expect(runs).toBe(1);
+      expect(await worker.check()).toBe('idle');
+      expect(runs).toBe(1);
+    } finally { database.close(); rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it('starts one run when something is due, never a second while it runs, and records the result', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'auto-refresh-'));
     try {
@@ -241,7 +261,7 @@ describe('alignment prompt', () => {
       writeFileSync(decisions, JSON.stringify({ groups: [{ title: 'Release cards', conversations: [key('a')] }] }));
       runCli(['apply', decisions], { dir, database, now: NOW, print: () => {} });
       const task = buildRefreshTask({ needs: { due: 1, ungrouped: 0, goalsStale: false, unaligned: 1, needed: true }, reason: 'scheduled', dataDir: dir, ledgerDir: dir, pluginRoot: PLUGIN_ROOT, openDatabase: handle(database), now: () => NOW });
-      const ask = async (prompt: string) => {
+      const ask = async (prompt: string, _models: unknown, schema?: unknown) => {
         if (prompt.includes('Do only section 2')) {
           const [show] = JSON.parse(readFileSync(/is in (\S+\.json)/.exec(prompt)![1], 'utf8'));
           return JSON.stringify({ reviews: [{ groupId: show.groupId, state: 'in-progress', percent: 10, summary: 'Started.', reviewBasis: show.reviewBasis }] });
@@ -252,6 +272,8 @@ describe('alignment prompt', () => {
           expect(prompt).toContain(`Decide each of these 1 groups, in "links" or "unaligned": ${input.groups[0].groupId}.`);
           return JSON.stringify({ links: [], unaligned: [input.groups[0].groupId] });
         }
+        expect(schema).toBe(STORY_ANSWER_SCHEMA);
+        expect(STORY_ANSWER_SCHEMA.required).toEqual(['narrative', 'preferences']);
         return JSON.stringify({ narrative: 'Started.', preferences: [] });
       };
       expect(await task.run(ask, 'codex')).toBe('1 requests reviewed, 0 linked to goals, story written.');

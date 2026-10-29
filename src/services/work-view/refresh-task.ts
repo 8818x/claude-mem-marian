@@ -19,7 +19,7 @@ import type { UsableAgentId } from '../agent-runner/detect.js';
 import { runCommand } from '../agent-runner/detect.js';
 import { writeOwnerPromptsFile, type OwnerPromptsFile } from '../prompt-import/owner-prompts-file.js';
 import { resolvePythonCommand } from './python.js';
-import { readGoals, runCli, validateGroupingAnswer, type LedgerDatabase, type RefreshNeeds } from './request-groups.mjs';
+import { readGoals, runCli, validateGroupingAnswer, PREFERENCE_KINDS, type LedgerDatabase, type RefreshNeeds } from './request-groups.mjs';
 
 /** claude-mem MCP tools a refresh may call: reads only. Saves go through the skills' scripts and their
  * validators (save_goals.py, the request-groups CLI), never a raw work_state_write. */
@@ -45,6 +45,16 @@ export const GROUPING_ANSWER_SCHEMA: AnswerSchema = strictObject({
     links: { type: 'array', items: strictObject({ kind: { type: 'string', enum: ['shared-work-list', 'shared-request-id', 'agent-judgment'] }, conversations: stringArray, evidence: { type: 'string' } }) },
   }) },
   ignored: { type: 'array', items: strictObject({ conversation: { type: 'string' }, reason: { type: 'string' } }) },
+});
+
+/** The existing record-story payload, without accepting a partial prose answer. */
+export const STORY_ANSWER_SCHEMA: AnswerSchema = strictObject({
+  narrative: { type: 'string' },
+  preferences: { type: 'array', items: strictObject({
+    preference: { type: 'string' }, kind: { type: 'string', enum: PREFERENCE_KINDS },
+    supportCount: { type: 'integer' },
+    quotes: { type: 'array', items: strictObject({ quote: { type: 'string' }, at: { type: ['string', 'null'] } }) },
+  }) },
 });
 
 /** When each step ran, for refresh.json's run record (not shown in My Work). */
@@ -303,7 +313,7 @@ export function buildRefreshTask(options: RefreshTaskOptions): AgentTask & { ste
         await step('story', [
           requestProgress, '---', readOnly,
           `Do only section 4 (${storyInput.update ? 'update' : 'write'} the build story). The \`story-input\` output is in ${writeInput('story-input', storyInput)}. Reply with only the JSON that \`record-story\` takes ({"narrative": "...", "preferences": [...]}).`,
-        ].join('\n\n'), answer => cli(['record-story'], answer));
+        ].join('\n\n'), answer => cli(['record-story'], answer), STORY_ANSWER_SCHEMA);
         done.push(storyInput.update ? 'story updated' : 'story written');
       }
       return done.length ? `${done.join(', ')}.` : 'Nothing was due.';

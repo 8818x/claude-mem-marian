@@ -81,7 +81,7 @@ export function readAgentRecords(database, { observationLimit = 300, summaryLimi
   const calls = safeRead(database, `SELECT id, project, platform_source, agent_id, agent_type, session_db_id, memory_session_id, content_session_id, prompt_number, tool_input, created_at_epoch
     FROM tool_uses WHERE tool_name IN (SELECT DISTINCT tool_name FROM tool_uses WHERE tool_name LIKE '%work_state_write%')
     AND created_at_epoch >= ? ORDER BY id DESC LIMIT ?`, [workSinceEpoch, workCallLimit]);
-  const observations = safeRead(database, `SELECT id, project, memory_session_id, content_session_id, agent_id, agent_type, prompt_number, title, subtitle, type, created_at_epoch
+  const observations = safeRead(database, `SELECT id, project, memory_session_id, agent_id, agent_type, prompt_number, title, subtitle, type, created_at_epoch
     FROM observations ORDER BY created_at_epoch DESC, id DESC LIMIT ?`, [observationLimit]);
   const summaries = safeRead(database, `SELECT id, project, memory_session_id, prompt_number, request, completed, next_steps, created_at_epoch
     FROM session_summaries ORDER BY created_at_epoch DESC, id DESC LIMIT ?`, [summaryLimit]);
@@ -405,6 +405,11 @@ export function buildAgentView(state, records, { now = Date.now(), workLimit = 2
     return evidence.filter((entry) => entry.atEpoch >= lastActive).sort((a, b) => b.atEpoch - a.atEpoch)[0] ?? null;
   }
 
+  // Request identity outlives the bounded activity window; it does not prove work or presence.
+  const recordedGroupIds = new Set(groups.keys());
+  const mainSessionIds = new Set([...groups.values()].filter((group) => !group.isSubagent).map((group) => group.sessionId));
+  for (const session of sessions) if (!mainSessionIds.has(session.id)) getGroup({ session, project: session.project });
+
   const agents = [...groups.values()].map((group) => {
     const { lastActivityEpoch, ...publicGroup } = group;
     const age = Math.max(0, now - lastActivityEpoch);
@@ -424,9 +429,10 @@ export function buildAgentView(state, records, { now = Date.now(), workLimit = 2
   }).sort((a, b) => String(b.presence.lastActivityAt ?? '').localeCompare(String(a.presence.lastActivityAt ?? '')));
   const recentActivity = activity.sort((a, b) => b.atEpoch - a.atEpoch).slice(0, activityLimit);
   const requestProjection = buildHumanRequests({ agents, recentActivity }, records, { titleCache, ledger });
+  const visibleAgentIds = new Set([...recordedGroupIds, ...requestProjection.humanRequests.flatMap((request) => request.agentIds)]);
   return {
     version: 1, generatedAt: stamp(now), currentProject: state.currentProject, currentProjectScope: state.currentProjectScope,
-    agents, recentActivity, goals: buildOwnerGoals(state), goalHistory: buildOwnerGoalHistory(state),
+    agents: agents.filter((agent) => visibleAgentIds.has(agent.id)), recentActivity, goals: buildOwnerGoals(state), goalHistory: buildOwnerGoalHistory(state),
     ...buildRules(state, ledger),
     ...requestProjection,
     coverage: { workRows: candidates.length, workLimit, linkedWork, ownerWork, unattributedWork, observations: observations.length, observationLimit: 300, summaries: summaries.length, livePresenceAvailable: false, summaryMethod: 'bounded-recorded-text', fullHistoryUrl: '/viewer' },

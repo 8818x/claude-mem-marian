@@ -285,7 +285,7 @@ export function buildHumanRequests(view, records = {}, { titleCache = {}, ledger
     const related = [...relatedIds].flatMap((id) => promptsBySession.get(id) ?? []);
     // A new ask is activity on its request, even before any agent records work.
     request.updatedAtEpoch = Math.max(request.updatedAtEpoch, request.original.atEpoch ?? 0, ...related.map((prompt) => prompt.created_at_epoch ?? 0));
-    if (!request.agentIds.length) for (const agent of view.agents ?? []) if (relatedIds.has(agent.sessionId) && !request.agentIds.includes(agent.id)) request.agentIds.push(agent.id);
+    for (const agent of view.agents ?? []) if (!agent.isSubagent && relatedIds.has(agent.sessionId) && !request.agentIds.includes(agent.id)) request.agentIds.push(agent.id);
     request.scopeUpdates = related.filter((prompt) => !(request.original.source === 'user-prompt' && prompt.id === request.original.sourceId) && requestText(prompt.prompt_text) && (request.original.promptNumber == null || prompt.prompt_number >= request.original.promptNumber))
       .sort((a, b) => (b.created_at_epoch ?? 0) - (a.created_at_epoch ?? 0) || b.prompt_number - a.prompt_number || b.id - a.id)
       .slice(0, 6).reverse().map((prompt) => ({ text: requestText(prompt.prompt_text, 500), sourceId: prompt.id, url: `/api/work-view/evidence/prompt/${prompt.id}`, promptNumber: prompt.prompt_number, atEpoch: prompt.created_at_epoch ?? null }));

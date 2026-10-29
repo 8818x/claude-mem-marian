@@ -647,8 +647,9 @@ export function MyRules() {
   const [fileOpen, setFileOpen] = useState(false)
   const lastChange = history.at(-1) ?? null
 
-  const suggestions = useMemo(() => rules.filter((rule) => rule.status === 'suggested' || rule.id in decisions).sort(byStrength), [rules, decisions])
-  const waiting = suggestions.filter((rule) => !decisions[rule.id]).length
+  const suggestions = useMemo(() => rules.filter((rule) => rule.status === 'suggested' || rule.status === 'dismissed' || rule.id in decisions).sort(byStrength), [rules, decisions])
+  const queueDecisions: Record<string, Decision> = { ...Object.fromEntries(rules.filter((rule) => rule.status === 'dismissed').map((rule) => [rule.id, 'rejected' as const])), ...decisions }
+  const waiting = suggestions.filter((rule) => !queueDecisions[rule.id]).length
   const approvedNow = new Set(Object.entries(decisions).filter(([, decision]) => decision === 'approved').map(([id]) => id))
 
   const countsByScope = new Map(ruleScopes.map((scope) => {
@@ -785,7 +786,7 @@ export function MyRules() {
 
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_15rem]">
           <div className="min-w-0 space-y-10">
-            <DecisionQueue suggestions={suggestions} decisions={decisions} onDecide={decide} onUndo={undoDecision} onShow={(rule) => jump(rule.id)}
+            <DecisionQueue suggestions={suggestions} decisions={queueDecisions} onDecide={decide} onUndo={undoDecision} onShow={(rule) => jump(rule.id)}
               onEdit={(rule) => { setDraftError(null); setDraft({ id: rule.id, scopeId: rule.scopeId, newScopeName: '', when: rule.when, then: rule.then, approving: true }) }} />
             {ruleScopes.map((scope) => (
               <ScopeSection key={scope.id} scope={scope} rules={rules.filter((rule) => rule.scopeId === scope.id)} counts={countsByScope.get(scope.id)!}

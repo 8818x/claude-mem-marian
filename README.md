@@ -1,3 +1,5 @@
+> **Marian** — reliability patch set for this fork. See [MARIAN.md](MARIAN.md) for batching, session identity, rejected-rule Undo and refresh changes.
+
 <h1 align="center">
   <br>
   <a href="https://github.com/thedotmack/claude-mem">

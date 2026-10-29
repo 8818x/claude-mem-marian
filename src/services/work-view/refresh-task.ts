@@ -1,3 +1,4 @@
+// Modified by the Marian fork: structured review answers carry the validator's text budgets.
 /**
  * The job My Work's automatic refresh hands the agent runner: refresh the
  * owner's goals when they are stale, then group, review, sort into focus areas and retell
@@ -20,7 +21,7 @@ import { runCommand } from '../agent-runner/detect.js';
 import { writeOwnerPromptsFile, type OwnerPromptsFile } from '../prompt-import/owner-prompts-file.js';
 import { resolvePythonCommand } from './python.js';
 import { SettingsDefaultsManager } from '../../shared/SettingsDefaultsManager.js';
-import { FOCUS_BATCH, readGoals, readLedger, runCli, validateFocusAnswer, validateGroupingAnswer, PREFERENCE_KINDS, type FocusInput, type LedgerDatabase, type RefreshNeeds } from './request-groups.mjs';
+import { FOCUS_BATCH, readGoals, readLedger, runCli, validateFocusAnswer, validateGroupingAnswer, PREFERENCE_KINDS, PROGRESS_STATES, USAGE_LEVELS, VALUE_LEVELS, type FocusInput, type LedgerDatabase, type RefreshNeeds } from './request-groups.mjs';
 import { FOCUS_AUTO_PLACE_THRESHOLD, judgeFocusBatch, placesAlone, type FocusJudge, type FocusJudgement } from './focus-judge.mjs';
 import { isWithdrawnArea, PROPOSAL_KINDS, readFocusAreas, type FocusArea, type RouterFocusBody } from './my-focus.mjs';
 import { NAV_LABELS } from './nav-words.mjs';
@@ -57,6 +58,37 @@ type Step = keyof typeof STEP_MODELS;
 
 const strictObject = (properties: Record<string, unknown>) => ({ type: 'object', additionalProperties: false, required: Object.keys(properties), properties });
 const stringArray = { type: 'array', items: { type: 'string' } };
+const reviewText = (max: number) => ({ type: 'string', description: `At most ${max} characters; rewrite concisely without losing the evidence.` });
+const reviewDate = { type: ['string', 'null'], description: 'An ISO date or null.' };
+const nullable = (schema: Record<string, unknown>) => ({ anyOf: [schema, { type: 'null' }] });
+const assessedOutcome = (levels: readonly string[]) => nullable(strictObject({
+  level: { type: 'string', enum: levels }, text: reviewText(400), evidence: stringArray,
+}));
+
+/** Shape reviews before persistence. The local validator still enforces every length and date.
+ * String maxLength is unsupported by Claude structured outputs, so budgets go in descriptions. */
+export const REVIEW_ANSWER_SCHEMA: AnswerSchema = strictObject({
+  reviews: { type: 'array', items: strictObject({
+    groupId: { type: 'string' }, state: { type: 'string', enum: PROGRESS_STATES }, percent: { type: 'integer' },
+    startedAt: reviewDate, shippedAt: reviewDate, lastActivityAt: reviewDate,
+    summary: reviewText(280), narrative: reviewText(1200), evidence: stringArray,
+    reviewBasis: strictObject({ checkedThrough: { type: 'string' }, conversations: stringArray }),
+    milestones: { type: 'array', description: 'At most 12 milestones.', items: strictObject({ at: reviewDate, text: reviewText(200), evidence: stringArray }) },
+    preferences: { type: 'array', description: 'At most 10 preferences.', items: strictObject({
+      preference: reviewText(200), quote: reviewText(300), kind: { type: 'string', enum: PREFERENCE_KINDS }, at: reviewDate,
+    }) },
+    outcome: nullable(strictObject({
+      landed: nullable(strictObject({ text: reviewText(400), at: reviewDate, evidence: stringArray })),
+      usage: assessedOutcome(USAGE_LEVELS), value: assessedOutcome(VALUE_LEVELS),
+      regressions: { type: 'array', description: 'At most 10 regressions.', items: strictObject({
+        text: reviewText(300), at: reviewDate, fixedBy: { type: ['string', 'null'], description: 'At most 200 characters, or null.' }, evidence: stringArray,
+      }) },
+      changes: { type: 'array', description: 'At most 12 changes.', items: strictObject({
+        what: reviewText(200), why: reviewText(400), at: reviewDate, evidence: stringArray,
+      }) },
+    })),
+  }) },
+});
 /** The decisions `apply` takes, as Codex's structured-output schema (strict mode: every field required). */
 export const GROUPING_ANSWER_SCHEMA: AnswerSchema = strictObject({
   groups: { type: 'array', items: strictObject({
@@ -393,8 +425,9 @@ export function buildRefreshTask(options: RefreshTaskOptions): AgentTask & { ste
           const text = await ask([
             requestProgress, '---', readOnly,
             `Do only section 2's review for the groups whose \`show\` output is in ${writeInput('show', shows)}: decide each one from the evidence as the reviewer task describes (amend the previous review for a group in "amend" mode). Reply with only {"reviews": [<one record-progress input per group, with reviewBasis copied verbatim from its show output>]}.`,
+            'Keep each outcome.changes[].what within 200 characters and why within 400. Aim below those ceilings; rewrite rather than cutting off sentences. Preserve evidence, dates and reviewBasis when correcting a refusal.',
             refusals.length ? `Your previous answer was refused for these groups:\n${refusals.join('\n')}\nFix them and answer again for those groups only. Here are the rejected reviews to correct, preserving their evidence and reviewBasis:\n${JSON.stringify(rejectedReviews)}` : '',
-          ].join('\n\n'), STEP_MODELS.review);
+          ].join('\n\n'), STEP_MODELS.review, REVIEW_ANSWER_SCHEMA);
           let reviews: Array<{ groupId?: string }> = [];
           try { const answer = parseAgentJson(text); reviews = Array.isArray(answer.reviews) ? answer.reviews : []; }
           catch { /* Every group in this batch is refused below as "no review was given". */ }

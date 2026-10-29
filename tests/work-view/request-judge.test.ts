@@ -1,3 +1,4 @@
+// Modified by the Marian fork: regression for bounded review answers and selective retry.
 import { describe, expect, it } from 'bun:test';
 import { everyRequestInOther, focusWriter } from '../helpers/fake-focus-writer.js';
 import { Database } from 'bun:sqlite';
@@ -334,6 +335,41 @@ describe('the request judge', () => {
       const ledger = readLedger(dir);
       expect(ledger.groups.conversations).toEqual({ [key('a')]: groupId, [key('b')]: groupId, [key('c')]: groupId, [key('d')]: groupIdFor(key('d')) });
       expect(ledger.groups.groups[groupId].links.map((link: any) => link.evidence)).toEqual(['stub scored 0.90', 'stub scored 0.90']);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('repairs a 228-character change through the review schema without re-reviewing accepted groups', async () => {
+    const dir = ledgerDir();
+    try {
+      const database = fixtureDatabase();
+      const groupId = ledgerWithOpenRequest(dir);
+      const task = buildRefreshTask({ localDeviceId: () => '', needs: { due: 1, ungrouped: 3, goalsStale: false, unplaced: 0, needed: true }, reason: 'test', dataDir: dir, ledgerDir: dir, pluginRoot: PLUGIN_ROOT, openDatabase: handle(database), judge: alwaysPlaces, now: () => NOW, saveFocus: focusWriter(database).save });
+      const batches: number[] = [];
+      const ask = async (prompt: string, _models: unknown, schema?: unknown) => {
+        if (prompt.includes('Do only section 3')) return everyRequestInOther(prompt);
+        if (!prompt.includes('Do only section 2')) return JSON.stringify({ narrative: 'Requests reviewed.', preferences: [] });
+        expect(schema).toBeDefined();
+        expect(JSON.stringify(schema)).toContain('200 characters');
+        const shows = JSON.parse((await import('node:fs')).readFileSync(/is in (\S+\.json)/.exec(prompt)![1], 'utf8'));
+        batches.push(shows.length);
+        const retry = batches.length > 1;
+        if (retry) {
+          expect(shows.map((show: { groupId: string }) => show.groupId)).toEqual([groupId]);
+          expect(prompt).toContain('outcome.changes[10].what is 228 characters');
+          expect(prompt).toContain('Cut at least 28 characters');
+        }
+        return JSON.stringify({ reviews: shows.map((show: { groupId: string; reviewBasis: unknown }) => ({
+          groupId: show.groupId, state: 'in-progress', percent: 30, summary: 'Under way.', reviewBasis: show.reviewBasis,
+          outcome: { changes: Array.from({ length: 11 }, (_, index) => ({
+            what: index === 10 && show.groupId === groupId ? 'x'.repeat(retry ? 100 : 228) : 'A small change',
+            why: 'Owner requested this change.', at: null, evidence: ['obs 101'],
+          })) },
+        })) });
+      };
+      expect(await task.run(ask, 'claude-code')).toContain('2 requests reviewed');
+      expect(batches).toEqual([2, 1]);
+      const progress = readLedger(dir).progress;
+      expect(progress[groupId].outcome.changes[10]).toMatchObject({ what: 'x'.repeat(100), why: 'Owner requested this change.', evidence: ['obs 101'] });
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 

@@ -1,3 +1,4 @@
+// Modified by the Marian fork: keep Windows refresh execution restricted and classify backend failures.
 /**
  * Runs one claude-mem job on the first installed, logged-in agent the user
  * already has (detect.ts order: Claude Code → Codex → Gemini). Shared by My
@@ -196,7 +197,7 @@ async function runCli(
 }
 
 function failure(name: string, result: CommandResult): Error {
-  if (name === 'codex exec' && /cannot enforce split filesystem read restrictions|Restricted read-only access requires|requires effective `:root` read access/.test(result.stderr)) {
+  if (name === 'codex exec' && /cannot enforce split filesystem read restrictions|Restricted read-only access requires|requires effective `:root` read access|native MXC is unavailable/.test(result.stderr)) {
     return new Error('Codex cannot enforce this refresh task\'s restricted read profile with the current Windows sandbox. Execution remains blocked; use a supported sandbox or another logged-in agent.');
   }
   const detail = `${result.stderr}\n${result.stdout}`.trim().split('\n').filter(Boolean).slice(-3).join(' ').slice(0, 500);
@@ -215,6 +216,8 @@ function failure(name: string, result: CommandResult): Error {
  */
 const CODEX_EXEC_ARGS = (executable: string, cwd: string, answerPath: string, schemaPath: string | null, { model, reasoningEffort }: StepModel = {}) => [
   'exec', '--strict-config', '-c', 'default_permissions="claude-mem-refresh"',
+  // Marian modification: use the elevated Windows backend for this profile's split read roots.
+  ...(process.platform === 'win32' ? ['-c', 'windows.sandbox="elevated"'] : []),
   '-c', `permissions.claude-mem-refresh.filesystem={":root"="deny",":minimal"="read",":workspace_roots"={"."="read"},${runtimeReadRoots(executable).map(path => `${JSON.stringify(path)}="read"`).join(',')}}`,
   '-c', 'permissions.claude-mem-refresh.network.enabled=false', '--ephemeral', '--ignore-user-config', '--skip-git-repo-check', '-C', cwd, '-o', answerPath,
   ...(schemaPath ? ['--output-schema', schemaPath] : []), ...(model ? ['-m', model] : []), ...(reasoningEffort ? ['-c', `model_reasoning_effort="${reasoningEffort}"`] : []), '-',

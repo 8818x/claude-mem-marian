@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- Modified by the Marian fork: shared Catppuccin themes and theme selector. -->
 <html lang="en">
 
 <head>
@@ -15,258 +16,7 @@
       font-display: swap;
     }
 
-    /* Theme Variables - Light Mode */
-    :root,
-    [data-theme="light"] {
-      --color-bg-primary: #ffffff;
-      --color-bg-secondary: #efebe4;
-      --color-bg-tertiary: #f0f0f0;
-      --color-bg-header: #f8f6f2;
-      --color-bg-card: #ffffff;
-      --color-bg-card-hover: #f8f6f2;
-      --color-bg-input: #ffffff;
-      --color-bg-button: #0969da;
-      --color-bg-button-hover: #1177e6;
-      --color-bg-button-active: #0860ca;
-      --color-bg-summary: #fffbf0;
-      --color-bg-prompt: #f6f3fb;
-      --color-bg-observation: #f0f6fb;
-      --color-bg-stat: #f8f6f2;
-      --color-bg-scrollbar-track: #ffffff;
-      --color-bg-scrollbar-thumb: #d1d5da;
-      --color-bg-scrollbar-thumb-hover: #b1b5ba;
-
-      --color-border-primary: #d0d7de;
-      --color-border-secondary: #d8dee4;
-      --color-border-hover: #0969da;
-      --color-border-focus: #0969da;
-      --color-border-summary: #d4a72c;
-      --color-border-summary-hover: #c29d29;
-      --color-border-prompt: #8250df;
-      --color-border-prompt-hover: #6e40c9;
-      --color-border-observation: #0969da;
-      --color-border-observation-hover: #0550ae;
-
-      --color-text-primary: #2b2520;
-      --color-text-secondary: #5a5248;
-      --color-text-tertiary: #726b5f;
-      --color-text-muted: #8f8a7e;
-      --color-text-header: #2b2520;
-      --color-text-title: #2b2520;
-      --color-text-subtitle: #5a5248;
-      --color-text-button: #ffffff;
-      --color-text-summary: #8a6116;
-      --color-text-observation: #2b2520;
-      --color-text-logo: #2b2520;
-
-      --color-accent-primary: #0969da;
-      --color-accent-focus: #0969da;
-      --color-accent-success: #1a7f37;
-      --color-accent-error: #d1242f;
-      --color-accent-summary: #9a6700;
-      --color-accent-prompt: #8250df;
-      --color-accent-observation: #0550ae;
-
-      --color-type-badge-bg: rgba(9, 105, 218, 0.12);
-      --color-type-badge-text: #0969da;
-      --color-summary-badge-bg: rgba(154, 103, 0, 0.12);
-      --color-summary-badge-text: #9a6700;
-      --color-prompt-badge-bg: rgba(130, 80, 223, 0.12);
-      --color-prompt-badge-text: #8250df;
-      --color-observation-badge-bg: rgba(9, 105, 218, 0.12);
-      --color-observation-badge-text: #0550ae;
-
-      --color-skeleton-base: #d0d7de;
-      --color-skeleton-highlight: #e8ecef;
-
-      --shadow-focus: 0 0 0 2px rgba(9, 105, 218, 0.3);
-
-      /* Source badges (external-brand tints) */
-      --color-source-claude-bg: rgba(255, 138, 61, 0.12);
-      --color-source-claude-text: #c25a00;
-      --color-source-claude-border: rgba(255, 138, 61, 0.22);
-      --color-source-codex-bg: rgba(33, 150, 243, 0.12);
-      --color-source-codex-text: #0f5ba7;
-      --color-source-codex-border: rgba(33, 150, 243, 0.24);
-      --color-source-cursor-bg: rgba(124, 58, 237, 0.12);
-      --color-source-cursor-text: #6d28d9;
-      --color-source-cursor-border: rgba(124, 58, 237, 0.24);
-      --color-source-antigravity-cli-bg: rgba(14, 165, 233, 0.12);
-      --color-source-antigravity-cli-text: #0284c7;
-      --color-source-antigravity-cli-border: rgba(14, 165, 233, 0.24);
-
-      /* Font families */
-      --font-terminal: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace;
-    }
-
-    /* Theme Variables - Dark Mode */
-    [data-theme="dark"] {
-      --color-bg-primary: #1a1916;
-      --color-bg-secondary: #252320;
-      --color-bg-tertiary: #1f1d1a;
-      --color-bg-header: #1f1d1a;
-      --color-bg-card: #252320;
-      --color-bg-card-hover: #2d2a26;
-      --color-bg-input: #252320;
-      --color-bg-button: #0969da;
-      --color-bg-button-hover: #1177e6;
-      --color-bg-button-active: #0860ca;
-      --color-bg-summary: #2a2724;
-      --color-bg-prompt: #262033;
-      --color-bg-observation: #1a2332;
-      --color-bg-stat: #252320;
-      --color-bg-scrollbar-track: #1a1916;
-      --color-bg-scrollbar-thumb: #3a3834;
-      --color-bg-scrollbar-thumb-hover: #4a4540;
-
-      --color-border-primary: #3a3834;
-      --color-border-secondary: #3a3834;
-      --color-border-hover: #4a4540;
-      --color-border-focus: #58a6ff;
-      --color-border-summary: #7a6a50;
-      --color-border-summary-hover: #8b7960;
-      --color-border-prompt: #6e5b9e;
-      --color-border-prompt-hover: #7e6bae;
-      --color-border-observation: #527aa0;
-      --color-border-observation-hover: #6a8eb8;
-
-      --color-text-primary: #dcd6cc;
-      --color-text-secondary: #b8b0a4;
-      --color-text-tertiary: #938a7e;
-      --color-text-muted: #7a7266;
-      --color-text-header: #e8e2d8;
-      --color-text-title: #e8e2d8;
-      --color-text-subtitle: #b8b0a4;
-      --color-text-button: #ffffff;
-      --color-text-summary: #d4b888;
-      --color-text-observation: #a8b8c8;
-      --color-text-logo: #e0dad0;
-
-      --color-accent-primary: #58a6ff;
-      --color-accent-focus: #58a6ff;
-      --color-accent-success: #16c60c;
-      --color-accent-error: #e74856;
-      --color-accent-summary: #d4b888;
-      --color-accent-prompt: #8e7cbc;
-      --color-accent-observation: #79b8ff;
-
-      --color-type-badge-bg: rgba(88, 166, 255, 0.125);
-      --color-type-badge-text: #58a6ff;
-      --color-summary-badge-bg: rgba(212, 184, 136, 0.15);
-      --color-summary-badge-text: #d4b888;
-      --color-prompt-badge-bg: rgba(142, 124, 188, 0.15);
-      --color-prompt-badge-text: #9e8ccc;
-      --color-observation-badge-bg: rgba(121, 184, 255, 0.15);
-      --color-observation-badge-text: #79b8ff;
-
-      --color-skeleton-base: #3a3834;
-      --color-skeleton-highlight: #4a4540;
-
-      --shadow-focus: 0 0 0 2px rgba(88, 166, 255, 0.2);
-
-      /* Source badges (external-brand tints) */
-      --color-source-claude-bg: rgba(255, 138, 61, 0.12);
-      --color-source-claude-text: #ffb067;
-      --color-source-claude-border: rgba(255, 176, 103, 0.2);
-      --color-source-codex-bg: rgba(33, 150, 243, 0.12);
-      --color-source-codex-text: #8fc7ff;
-      --color-source-codex-border: rgba(143, 199, 255, 0.2);
-      --color-source-cursor-bg: rgba(124, 58, 237, 0.12);
-      --color-source-cursor-text: #c4b5fd;
-      --color-source-cursor-border: rgba(196, 181, 253, 0.2);
-      --color-source-antigravity-cli-bg: rgba(14, 165, 233, 0.12);
-      --color-source-antigravity-cli-text: #38bdf8;
-      --color-source-antigravity-cli-border: rgba(56, 189, 248, 0.2);
-
-      /* Font families */
-      --font-terminal: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace;
-    }
-
-    /* System preference default before the theme hook sets data-theme.
-       Must mirror [data-theme="dark"] exactly; :root already holds light. */
-    @media (prefers-color-scheme: dark) {
-      :root:not([data-theme]) {
-        --color-bg-primary: #1a1916;
-        --color-bg-secondary: #252320;
-        --color-bg-tertiary: #1f1d1a;
-        --color-bg-header: #1f1d1a;
-        --color-bg-card: #252320;
-        --color-bg-card-hover: #2d2a26;
-        --color-bg-input: #252320;
-        --color-bg-button: #0969da;
-        --color-bg-button-hover: #1177e6;
-        --color-bg-button-active: #0860ca;
-        --color-bg-summary: #2a2724;
-        --color-bg-prompt: #262033;
-        --color-bg-observation: #1a2332;
-        --color-bg-stat: #252320;
-        --color-bg-scrollbar-track: #1a1916;
-        --color-bg-scrollbar-thumb: #3a3834;
-        --color-bg-scrollbar-thumb-hover: #4a4540;
-
-        --color-border-primary: #3a3834;
-        --color-border-secondary: #3a3834;
-        --color-border-hover: #4a4540;
-        --color-border-focus: #58a6ff;
-        --color-border-summary: #7a6a50;
-        --color-border-summary-hover: #8b7960;
-        --color-border-prompt: #6e5b9e;
-        --color-border-prompt-hover: #7e6bae;
-        --color-border-observation: #527aa0;
-        --color-border-observation-hover: #6a8eb8;
-
-        --color-text-primary: #dcd6cc;
-        --color-text-secondary: #b8b0a4;
-        --color-text-tertiary: #938a7e;
-        --color-text-muted: #7a7266;
-        --color-text-header: #e8e2d8;
-        --color-text-title: #e8e2d8;
-        --color-text-subtitle: #b8b0a4;
-        --color-text-button: #ffffff;
-        --color-text-summary: #d4b888;
-        --color-text-observation: #a8b8c8;
-        --color-text-logo: #e0dad0;
-
-        --color-accent-primary: #58a6ff;
-        --color-accent-focus: #58a6ff;
-        --color-accent-success: #16c60c;
-        --color-accent-error: #e74856;
-        --color-accent-summary: #d4b888;
-        --color-accent-prompt: #8e7cbc;
-        --color-accent-observation: #79b8ff;
-
-        --color-type-badge-bg: rgba(88, 166, 255, 0.125);
-        --color-type-badge-text: #58a6ff;
-        --color-summary-badge-bg: rgba(212, 184, 136, 0.15);
-        --color-summary-badge-text: #d4b888;
-        --color-prompt-badge-bg: rgba(142, 124, 188, 0.15);
-        --color-prompt-badge-text: #9e8ccc;
-        --color-observation-badge-bg: rgba(121, 184, 255, 0.15);
-        --color-observation-badge-text: #79b8ff;
-
-        --color-skeleton-base: #3a3834;
-        --color-skeleton-highlight: #4a4540;
-
-        --shadow-focus: 0 0 0 2px rgba(88, 166, 255, 0.2);
-
-        /* Source badges (external-brand tints) */
-        --color-source-claude-bg: rgba(255, 138, 61, 0.12);
-        --color-source-claude-text: #ffb067;
-        --color-source-claude-border: rgba(255, 176, 103, 0.2);
-        --color-source-codex-bg: rgba(33, 150, 243, 0.12);
-        --color-source-codex-text: #8fc7ff;
-        --color-source-codex-border: rgba(143, 199, 255, 0.2);
-        --color-source-cursor-bg: rgba(124, 58, 237, 0.12);
-        --color-source-cursor-text: #c4b5fd;
-        --color-source-cursor-border: rgba(196, 181, 253, 0.2);
-        --color-source-antigravity-cli-bg: rgba(14, 165, 233, 0.12);
-        --color-source-antigravity-cli-text: #38bdf8;
-        --color-source-antigravity-cli-border: rgba(56, 189, 248, 0.2);
-
-        /* Font families */
-        --font-terminal: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace;
-      }
-    }
+    /* CATPPUCCIN_THEME_CSS */
 
     * {
       margin: 0;
@@ -384,6 +134,8 @@
       transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
     }
+
+    .theme-toggle-btn { width: auto; max-width: 120px; padding: 0 8px; }
 
     .settings-btn:hover,
     .theme-toggle-btn:hover {
@@ -988,7 +740,7 @@
       border: 1px solid var(--color-border-primary);
     }
 
-    [data-theme="dark"] .summary-project-badge {
+    [data-theme]:not([data-theme="latte"]) .summary-project-badge {
       background: rgba(255, 255, 255, 0.03);
     }
 
@@ -2447,7 +2199,7 @@
     }
 
     /* Log Level Colors in Dark Mode */
-    [data-theme="dark"] .log-line-raw {
+    [data-theme]:not([data-theme="latte"]) .log-line-raw {
       color: #8b949e;
     }
 
@@ -2930,8 +2682,6 @@
       .welcome-modal-feature-inner { min-height: 0; padding: 20px; }
     }
     /* Memory refinement: readable type and quiet, legible metadata. */
-    :root, [data-theme="light"] { --color-text-muted: #716a60; --color-log-debug: #61656b; --color-log-info: #075fb2; --color-log-warn: #805600; --color-log-error: #b4232b; --color-log-success: #197333; }
-    [data-theme="dark"] { --color-text-muted: #a29a8e; --color-log-debug: #aaa49c; --color-log-info: #79b8ff; --color-log-warn: #eac06b; --color-log-error: #ff8a8a; --color-log-success: #7dd896; }
     .card-title, .summary-title { font-size: 18px; line-height: 1.4; font-weight: 650; letter-spacing: -.015em; overflow-wrap: anywhere; }
     .card-subtitle, .narrative, .facts-list, .summary-section-content, .card-content { font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
     .card-meta, .summary-card-footer, .session-card-meta { font-size: 12px; line-height: 1.55; color: var(--color-text-secondary); }
@@ -2976,8 +2726,6 @@
     }
     .form-field > input, .form-field > select, .form-field > textarea { width: 100%; min-width: 0; max-width: 100%; }
     .form-field > .toggle-description { display: block; margin-top: 8px; overflow-wrap: anywhere; }
-    :root, [data-theme="light"] { --color-log-component: #695477; }
-    [data-theme="dark"] { --color-log-component: #c0b1cc; }
     .log-line-raw { color: var(--color-text-secondary); }
     @media(max-width: 680px) {
       .status > select { display: block; width: auto; flex: 1; min-width: 0; max-width: 100%; }

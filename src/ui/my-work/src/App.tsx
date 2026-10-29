@@ -1,4 +1,6 @@
+// Modified by the Marian fork: shared, persistent Catppuccin themes.
 import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import { THEMES, applyTheme, parseTheme, readTheme, saveTheme, type Theme } from '../../viewer/themes'
 import { MotionConfig } from 'motion/react'
 import { InboxIcon, ListChecksIcon, UsersIcon } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -43,14 +45,11 @@ type View = NavPage | 'suggested' | 'past-focus'
 const NAV_SECTIONS = [...new Set(PAGES.map((entry) => entry.section))]
 
 
-/** Wireframe-only theme switch: starts from ?theme=dark|light, else the system preference. */
-function useDarkMode() {
-  const [dark, setDark] = useState(() => {
-    const requested = new URLSearchParams(window.location.search).get('theme')
-    return requested ? requested === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches
-  })
-  useEffect(() => { document.documentElement.classList.toggle('dark', dark) }, [dark])
-  return [dark, setDark] as const
+/** Starts from a theme preview URL, saved choice, or the system preference. */
+function useColorTheme() {
+  const [theme, setTheme] = useState<Theme>(readTheme)
+  useEffect(() => { applyTheme(theme) }, [theme])
+  return [theme, (next: Theme) => { saveTheme(next); setTheme(next) }] as const
 }
 
 /** Small rounded icon tile behind each nav icon, after the fly.io sidebar: a hairline with a soft tile shadow. */
@@ -158,7 +157,7 @@ function LoadedApp() {
   // Outside sample mode the place comes from the source: the local worker is at home, cmem.ai is on the go.
   const workspace: Workspace = sample ? workspaceChoice : { ...workspaceChoice, mode: sourceKind === 'cloud' ? 'web' : 'home' }
   const [showSpec, setShowSpec] = useState(false)
-  const [dark, setDark] = useDarkMode()
+  const [theme, setTheme] = useColorTheme()
   // Whether the opened request was in today's live feed, so the drawer can tell "left the feed" from "never in it".
   const [openRequest, setOpenRequestState] = useState<{ request: Request; fromLiveFeed: boolean } | null>(null)
   const setOpenRequest = (request: Request | null) => setOpenRequestState(request ? { request, fromLiveFeed: requestById(request.id) !== null } : null)
@@ -205,8 +204,11 @@ function LoadedApp() {
                 </Req>}
                 <div className="ml-auto flex items-center gap-3">
                   <div className="flex items-center gap-1.5">
-                    <Switch id="dark-mode" checked={dark} onCheckedChange={setDark} />
-                    <Label htmlFor="dark-mode" className="text-xs">Dark</Label>
+                    <Label htmlFor="color-theme" className="text-xs">Theme</Label>
+                    <select id="color-theme" aria-label="Catppuccin theme" className="h-7 rounded-md border border-border bg-card px-2 text-xs text-foreground"
+                      value={theme} onChange={(event) => setTheme(parseTheme(event.target.value, false))}>
+                      {THEMES.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+                    </select>
                   </div>
                   <div className="flex items-center gap-1.5">
                     <Switch id="spec-overlay" checked={showSpec} onCheckedChange={setShowSpec} />

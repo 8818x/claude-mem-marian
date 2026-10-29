@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// Modified by the Marian fork: embed the shared Catppuccin stylesheet.
 
 import * as esbuild from 'esbuild';
 import * as fs from 'fs';
@@ -38,7 +39,7 @@ async function buildViewer() {
     );
     fs.writeFileSync(
       path.join(rootDir, 'plugin/ui/viewer.html'),
-      htmlTemplate
+      htmlTemplate.replace('/* CATPPUCCIN_THEME_CSS */', fs.readFileSync(path.join(rootDir, 'src/ui/catppuccin.css'), 'utf-8'))
     );
 
     // Observation TV is a standalone page with no bundle — copy it verbatim.

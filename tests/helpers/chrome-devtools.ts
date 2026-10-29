@@ -1,3 +1,4 @@
+// Modified by the Marian fork: browser fixtures embed the shared theme CSS.
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -47,7 +48,8 @@ export const scriptResponse = (script: string) => new Response(script, { headers
 
 /** The real viewer page; it loads its bundle from `/viewer-bundle.js`. */
 export function readViewerTemplateHtml(): string {
-  return readFileSync(join(REPOSITORY_ROOT, 'src/ui/viewer-template.html'), 'utf8');
+  return readFileSync(join(REPOSITORY_ROOT, 'src/ui/viewer-template.html'), 'utf8')
+    .replace('/* CATPPUCCIN_THEME_CSS */', readFileSync(join(REPOSITORY_ROOT, 'src/ui/catppuccin.css'), 'utf8'));
 }
 
 /** The viewer template's stylesheet, for fixtures that render one component. */

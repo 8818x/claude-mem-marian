@@ -66,10 +66,6 @@ function mockSettingsFromFile(settingsPath?: string, applyEnvOverrides = true): 
   return { ...settings, ...extraMockSettings };
 }
 
-mock.module('../../../src/services/worker-service.js', () => ({
-  updateCursorContextForProject: () => Promise.resolve(),
-}));
-
 mock.module('../../../src/utils/claude-md-utils.js', () => ({
   updateFolderClaudeMdFiles: (...args: unknown[]) => mockUpdateFolderClaudeMdFiles(...args),
 }));

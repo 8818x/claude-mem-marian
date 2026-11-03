@@ -1,7 +1,9 @@
 
 import { DatabaseManager } from './DatabaseManager.js';
 import { SessionManager } from './SessionManager.js';
+// Modified by the claude-mem-marian fork: Decision 16 provider-body scrubbing.
 import { logger } from '../../utils/logger.js';
+import { scrubCredentials, registerScrubValues } from '../../utils/credential-redaction.js';
 import { SettingsDefaultsManager } from '../../shared/SettingsDefaultsManager.js';
 import { describeNetworkFailure, isConnectionRefused } from '../../shared/network-failure.js';
 import { getCredential } from '../../shared/EnvManager.js';
@@ -562,7 +564,9 @@ export class GeminiProvider extends OpenAICompatibleProvider<GeminiConfig> {
             const errorBody = await readCappedErrorBody(response);
             logger.error('SDK', `Gemini reply was empty because thinking consumed the output budget, and disabling thinking was rejected (status ${response.status}); this turn stores no observations`, {
               model,
-              body: errorBody.slice(0, 300),
+              // Decision 16: scrub the untrusted provider body before its
+              // display limit.
+              body: scrubCredentials(errorBody).slice(0, 300),
             });
           } else {
             const retryData = await response.json() as GeminiResponse;
@@ -640,6 +644,9 @@ export class GeminiProvider extends OpenAICompatibleProvider<GeminiConfig> {
     // With only the list configured, its first entry becomes the primary so
     // availability checks and error messages keep working unchanged.
     const apiKey = apiKeys[0] ?? '';
+    // Decision 16: pool members are exact active credentials for this
+    // operation — registered with the logger's bounded scrub registry.
+    registerScrubValues(apiKeys);
 
     const defaultModel: GeminiModel = 'gemini-flash-latest';
     const configuredModel = settings.CLAUDE_MEM_GEMINI_MODEL || defaultModel;

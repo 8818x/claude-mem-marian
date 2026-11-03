@@ -1,9 +1,9 @@
+// Modified by the claude-mem-marian fork: retired host routes and cleanup contracts. Upstream attribution is retained.
 import { afterAll, afterEach, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
-  antigravityCliAdapter,
   inspectAntigravityTurn,
   resolveAntigravityPreInvocation,
 } from '../../src/cli/adapters/antigravity-cli.js';
@@ -206,21 +206,19 @@ describe('home-directory paths (#5078)', () => {
 });
 
 describe('observation file evidence for agy tools', () => {
-  // The worker sees the tool input as the adapter normalized it on PostToolUse.
-  const postToolUse = (name: string, args: Record<string, unknown>) => {
-    const normalized = antigravityCliAdapter.normalizeInput({
-      workspacePaths: [workspace],
-      conversationId: 'conv-1',
-      toolCall: { name, args },
-    });
-    return { type: 'observation' as const, tool_name: normalized.toolName, tool_input: normalized.toolInput };
-  };
+  // Decision 11: the adapter is retired; the shared evidence contract is
+  // exercised with explicit normalized tool inputs (agy's Path maps to file_path).
+  const postToolUse = (name: string, args: Record<string, unknown>) => ({
+    type: 'observation' as const,
+    tool_name: name,
+    tool_input: args,
+  });
 
-  it('records read_file/view_file Path as reads and edit_file path as a write', () => {
+  it('records read_file/view_file file_path as reads and edit_file file_path as a write', () => {
     const evidence = extractObservationFileEvidence([
-      postToolUse('read_file', { Path: '/abs/a.ts' }),
-      postToolUse('view_file', { Path: JSON.stringify('/abs/b.ts') }),
-      postToolUse('edit_file', { path: '/abs/c.ts' }),
+      postToolUse('read_file', { file_path: '/abs/a.ts' }),
+      postToolUse('view_file', { file_path: '/abs/b.ts' }),
+      postToolUse('edit_file', { file_path: '/abs/c.ts' }),
     ]);
     expect(evidence.files_read).toEqual(['/abs/a.ts', '/abs/b.ts']);
     expect(evidence.files_modified).toEqual(['/abs/c.ts']);

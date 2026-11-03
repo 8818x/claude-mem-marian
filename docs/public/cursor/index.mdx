@@ -1,15 +1,19 @@
 ---
 title: "Cursor Integration"
-description: "Persistent memory for Cursor — install with npx, no git clone"
+description: "Legacy upstream reference; new Cursor host installs are unsupported in Marian"
 ---
+
+<Note>
+**Modified by the claude-mem-marian fork:** Cursor active hook support is retired. Legacy `hook cursor` invocations are acknowledged without capturing anything. Marian keeps the migration diagnostics: run `bun <plugin>/scripts/worker-service.cjs cursor status` or `cursor uninstall` from the affected workspace (where `<plugin>` is the installed marketplace directory, e.g. `~/.claude/plugins/marketplaces/thedotmack`). Use the maintained-host instructions in [Installation](/installation).
+</Note>
 
 # Cursor Integration
 
-Give Cursor a memory that lasts across chats. The installer wires Cursor hooks (small scripts Cursor runs when a session starts, a file is read, or a tool runs), starts the local worker (the program that stores notes), and uses **CMEM Pro** (the hosted memory service) unless you pick another provider.
+Upstream releases wired Cursor hooks (small scripts Cursor runs when a session starts, a file is read, or a tool runs), started the local worker (the program that stores notes), and used **CMEM Pro** (the hosted memory service) unless you picked another provider.
 
 <CardGroup cols={2}>
-  <Card title="One command" icon="terminal">
-    `npx claude-mem install` — do not clone the repo to install.
+  <Card title="Legacy install" icon="terminal">
+    Upstream used `npx claude-mem install`; Marian's installer does not configure Cursor.
   </Card>
   <Card title="CMEM Pro default" icon="cloud">
     Memory notes are written off-plan through the hosted service unless you pick Gemini, OpenRouter, or your Anthropic plan.
@@ -24,16 +28,12 @@ Give Cursor a memory that lasts across chats. The installer wires Cursor hooks (
 
 ## Install
 
-```bash
-npx claude-mem install
-```
-
-When the installer lists your apps, pick **Cursor**. The three stages are: install runtime, sign in (device code, no email in the CLI), then pick a memory provider. **CMEM Pro is pre-selected.**
+Marian's installer configures Claude Code or Codex CLI. It does not offer Cursor as an installation target; the steps below describe the inherited upstream integration only.
 
 Other provider choices: your Gemini key, your OpenRouter key, or your Anthropic plan (`--provider claude`, which skips the sign-in step; local installs contact cmem.ai once, at signup, to create the sign-in link, with a numbers-only usage summary (observation counts and token totals, no prompts, paths, or project names), and nothing else is sent to cmem.ai). Details: [Installation](/installation).
 
 <Warning>
-`npm install -g claude-mem` installs the library only. It does **not** register Cursor hooks or start the worker. Always use `npx claude-mem install`.
+In upstream releases, `npm install -g claude-mem` installed the library only; `npx claude-mem install` performed the Cursor setup. Marian's installer does not configure Cursor.
 </Warning>
 
 Do not clone this repository to install. Clone is for people changing the code.

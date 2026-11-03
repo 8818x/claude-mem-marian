@@ -3,9 +3,10 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'os';
 import path from 'path';
 
-// install/uninstall must treat ~/.cursor/hooks.json as shared with the user:
-// only entries running `worker-service ... hook cursor` are claude-mem's.
-describe('Cursor hooks.json install/uninstall preserves user hooks', () => {
+// Decision 08: Cursor hook installation is retired. Legacy fixtures are seeded
+// directly (never through the removed installer); the retained contracts are
+// selective uninstall, status diagnostics, and the install/setup refusal.
+describe('Cursor hooks.json cleanup preserves user hooks', () => {
   let tmp: string;
   let home: string;
   let hooksJsonPath: string;
@@ -13,17 +14,22 @@ describe('Cursor hooks.json install/uninstall preserves user hooks', () => {
   const saved: Record<string, string | undefined> = {};
 
   const userHook = { command: './my-audit.sh' };
+  const ours = (event: string) => ({ command: `bun "W\\worker-service.cjs" hook cursor ${event}` });
 
   beforeEach(() => {
     tmp = realpathSync(mkdtempSync(path.join(tmpdir(), 'cursor-hooks-')));
     home = path.join(tmp, 'workspace');
-    const pluginRoot = path.join(tmp, 'plugin');
     mkdirSync(path.join(home, '.cursor'), { recursive: true });
-    mkdirSync(path.join(pluginRoot, 'scripts'), { recursive: true });
-    writeFileSync(path.join(pluginRoot, 'scripts', 'worker-service.cjs'), '');
     hooksJsonPath = path.join(home, '.cursor', 'hooks.json');
-    for (const key of ['CLAUDE_PLUGIN_ROOT']) saved[key] = process.env[key];
-    process.env.CLAUDE_PLUGIN_ROOT = pluginRoot;
+    // Isolate the registry (DATA_DIR) and config roots: cleanup unregisters the
+    // project, which must never touch the real ~/.claude-mem on this machine.
+    for (const key of ['CLAUDE_MEM_DATA_DIR', 'CLAUDE_CONFIG_DIR', 'HOME', 'USERPROFILE']) saved[key] = process.env[key];
+    const dataDir = path.join(tmp, 'data');
+    mkdirSync(dataDir, { recursive: true });
+    process.env.CLAUDE_MEM_DATA_DIR = dataDir;
+    process.env.CLAUDE_CONFIG_DIR = path.join(tmp, 'claude');
+    process.env.HOME = tmp;
+    process.env.USERPROFILE = tmp;
     // Use the 'project' target (.cursor under cwd): never touches the real ~/.cursor.
     originalCwd = process.cwd();
     process.chdir(home);
@@ -46,47 +52,46 @@ describe('Cursor hooks.json install/uninstall preserves user hooks', () => {
   }
 
   const read = () => JSON.parse(readFileSync(hooksJsonPath, 'utf-8'));
-  const isOurs = (h: { command: string }) => h.command.includes('worker-service') && h.command.includes('hook cursor');
 
-  it('install keeps the user\'s hooks and is idempotent', async () => {
-    writeFileSync(hooksJsonPath, JSON.stringify({
-      version: 1,
-      hooks: { stop: [userHook], beforeShellExecution: [{ command: './guard.sh' }] },
-    }));
-    const { installCursorHooks } = await installer();
-
-    expect(await installCursorHooks('project')).toBe(0);
-    expect(await installCursorHooks('project')).toBe(0);
-
-    const config = read();
-    expect(config.hooks.stop.filter(isOurs)).toHaveLength(1);
-    expect(config.hooks.stop).toContainEqual(userHook);
-    expect(config.hooks.beforeShellExecution).toEqual([{ command: './guard.sh' }]);
-    expect(config.hooks.beforeSubmitPrompt.filter(isOurs)).toHaveLength(2);
-  });
-
-  it('install refuses to overwrite an unparseable hooks.json', async () => {
-    writeFileSync(hooksJsonPath, '{ not json');
-    const { installCursorHooks } = await installer();
-
-    expect(await installCursorHooks('project')).toBe(1);
-    expect(readFileSync(hooksJsonPath, 'utf-8')).toBe('{ not json');
+  it('refuses install and setup with a message and no writes', async () => {
+    const { handleCursorCommand } = await installer();
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => { errors.push(args.join(' ')); };
+    try {
+      expect(await handleCursorCommand('install', [])).toBe(1);
+      expect(await handleCursorCommand('setup', [])).toBe(1);
+    } finally {
+      console.error = originalError;
+    }
+    expect(errors.some((line) => line.includes('not comparable') || line.includes('Unsupported installation target'))).toBe(true);
+    expect(existsSync(hooksJsonPath)).toBe(false);
   });
 
   it('uninstall removes only claude-mem entries and keeps the user\'s', async () => {
-    writeFileSync(hooksJsonPath, JSON.stringify({ version: 1, hooks: { stop: [userHook] } }));
-    const { installCursorHooks, uninstallCursorHooks } = await installer();
-    expect(await installCursorHooks('project')).toBe(0);
+    writeFileSync(hooksJsonPath, JSON.stringify({
+      version: 1,
+      hooks: {
+        stop: [userHook, ours('summarize')],
+        beforeSubmitPrompt: [ours('session-init'), ours('context'), userHook],
+      },
+    }));
+    const { uninstallCursorHooks } = await installer();
 
     expect(uninstallCursorHooks('project')).toBe(0);
 
-    expect(existsSync(hooksJsonPath)).toBe(true);
-    expect(read()).toEqual({ version: 1, hooks: { stop: [userHook] } });
+    expect(read()).toEqual({
+      version: 1,
+      hooks: {
+        stop: [userHook],
+        beforeSubmitPrompt: [userHook],
+      },
+    });
   });
 
   it('uninstall deletes hooks.json when claude-mem was its only author', async () => {
-    const { installCursorHooks, uninstallCursorHooks } = await installer();
-    expect(await installCursorHooks('project')).toBe(0);
+    writeFileSync(hooksJsonPath, JSON.stringify({ version: 1, hooks: { stop: [ours('summarize')] } }));
+    const { uninstallCursorHooks } = await installer();
 
     expect(uninstallCursorHooks('project')).toBe(0);
 
@@ -101,41 +106,19 @@ describe('Cursor hooks.json install/uninstall preserves user hooks', () => {
     expect(readFileSync(hooksJsonPath, 'utf-8')).toBe('{ not json');
   });
 
-  // Older installers pointed hooks.json at scripts copied into .cursor/hooks/.
-  const legacyEntry = { command: './.cursor/hooks/session-init.sh' };
-  const legacyPowerShellEntry = { command: 'powershell.exe -ExecutionPolicy Bypass -File "C:\\Users\\me\\.cursor\\hooks/session-summary.ps1"' };
-  const lookalikeUserHook = { command: './my-session-init.sh' };
-
-  it('install replaces legacy script entries instead of running both', async () => {
-    writeFileSync(hooksJsonPath, JSON.stringify({
-      version: 1,
-      hooks: { beforeSubmitPrompt: [legacyEntry, lookalikeUserHook], stop: [legacyPowerShellEntry] },
-    }));
-    const { installCursorHooks } = await installer();
-
-    expect(await installCursorHooks('project')).toBe(0);
-
-    const config = read();
-    expect(config.hooks.beforeSubmitPrompt).not.toContainEqual(legacyEntry);
-    expect(config.hooks.beforeSubmitPrompt).toContainEqual(lookalikeUserHook);
-    expect(config.hooks.beforeSubmitPrompt.filter(isOurs)).toHaveLength(2);
-    expect(config.hooks.stop).not.toContainEqual(legacyPowerShellEntry);
-    expect(config.hooks.stop.filter(isOurs)).toHaveLength(1);
-  });
-
   it('uninstall removes legacy script entries along with their scripts', async () => {
     const legacyScript = path.join(home, '.cursor', 'hooks', 'session-init.sh');
     mkdirSync(path.dirname(legacyScript), { recursive: true });
     writeFileSync(legacyScript, '#!/bin/sh\n');
     writeFileSync(hooksJsonPath, JSON.stringify({
       version: 1,
-      hooks: { beforeSubmitPrompt: [legacyEntry, lookalikeUserHook] },
+      hooks: { beforeSubmitPrompt: [{ command: './.cursor/hooks/session-init.sh' }, userHook] },
     }));
     const { uninstallCursorHooks } = await installer();
 
     expect(uninstallCursorHooks('project')).toBe(0);
 
-    expect(read()).toEqual({ version: 1, hooks: { beforeSubmitPrompt: [lookalikeUserHook] } });
+    expect(read()).toEqual({ version: 1, hooks: { beforeSubmitPrompt: [userHook] } });
     expect(existsSync(legacyScript)).toBe(false);
   });
 
@@ -143,13 +126,10 @@ describe('Cursor hooks.json install/uninstall preserves user hooks', () => {
     ['an event value that is not an array', { version: 1, hooks: { stop: { command: 'x' } } }],
     ['a hooks value that is not an object', { version: 1, hooks: ['x'] }],
   ] as const) {
-    it(`install and uninstall leave hooks.json untouched when it has ${label}`, async () => {
+    it(`uninstall leaves hooks.json untouched when it has ${label}`, async () => {
       const original = JSON.stringify(malformed);
       writeFileSync(hooksJsonPath, original);
-      const { installCursorHooks, uninstallCursorHooks } = await installer();
-
-      expect(await installCursorHooks('project')).toBe(1);
-      expect(readFileSync(hooksJsonPath, 'utf-8')).toBe(original);
+      const { uninstallCursorHooks } = await installer();
 
       expect(uninstallCursorHooks('project')).toBe(0);
       expect(readFileSync(hooksJsonPath, 'utf-8')).toBe(original);
@@ -171,34 +151,41 @@ describe('Cursor hooks.json install/uninstall preserves user hooks', () => {
     return lines.slice(start, end);
   }
 
-  it('status reports not installed when only the user\'s hooks remain after uninstall', async () => {
+  it('status reports not installed when only the user\'s hooks remain', async () => {
     writeFileSync(hooksJsonPath, JSON.stringify({ version: 1, hooks: { stop: [userHook] } }));
-    const { installCursorHooks, uninstallCursorHooks } = await installer();
-    expect(await installCursorHooks('project')).toBe(0);
-    expect(uninstallCursorHooks('project')).toBe(0);
 
     expect((await projectStatusLines())[0]).toBe('Project: Not installed (hooks.json has 1 user hook)');
   });
 
-  it('status reports unified mode even when a user hook comes first', async () => {
-    const { installCursorHooks } = await installer();
-    expect(await installCursorHooks('project')).toBe(0);
-    const config = read();
-    config.hooks.beforeSubmitPrompt.unshift(userHook);
-    writeFileSync(hooksJsonPath, JSON.stringify(config));
+  it('status reports unified entries with a user hook first and no reinstall advice', async () => {
+    writeFileSync(hooksJsonPath, JSON.stringify({
+      version: 1,
+      hooks: { beforeSubmitPrompt: [userHook, ours('session-init'), ours('context')] },
+    }));
 
     const status = await projectStatusLines();
     expect(status[0]).toBe('Project: Installed');
     expect(status).toContain('   Mode: Unified CLI (bun worker-service.cjs)');
     expect(status).toContain('   Other hooks: 1 (preserved)');
+    expect(status.join('\n')).not.toContain('reinstall');
   });
 
-  it('status recognises a legacy script install', async () => {
-    writeFileSync(hooksJsonPath, JSON.stringify({ version: 1, hooks: { beforeSubmitPrompt: [legacyEntry] } }));
+  it('status recognises legacy script residue as retired installer leftovers', async () => {
+    writeFileSync(hooksJsonPath, JSON.stringify({ version: 1, hooks: { beforeSubmitPrompt: [{ command: './.cursor/hooks/session-init.sh' }] } }));
 
     const status = await projectStatusLines();
     expect(status[0]).toBe('Project: Installed');
-    expect(status).toContain('   Mode: Legacy shell scripts (consider reinstalling for unified CLI)');
+    expect(status).toContain('   Mode: Legacy shell scripts (retired installer residue; \'cursor uninstall\' removes these)');
     expect(status).toContain('   Platform: Unix (bash)');
+  });
+
+  it('status reports a legacy project context file as a retired artifact', async () => {
+    const rulesDir = path.join(home, '.cursor', 'rules');
+    mkdirSync(rulesDir, { recursive: true });
+    writeFileSync(path.join(rulesDir, 'claude-mem-context.mdc'), '---\nalwaysApply: true\n---\nlegacy context\n');
+    writeFileSync(hooksJsonPath, JSON.stringify({ version: 1, hooks: { stop: [ours('summarize')] } }));
+
+    const status = await projectStatusLines();
+    expect(status).toContain('   Context: legacy claude-mem context file present (automatic updates are retired; \'cursor uninstall\' removes it)');
   });
 });

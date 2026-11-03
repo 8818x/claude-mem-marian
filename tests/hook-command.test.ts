@@ -1,4 +1,8 @@
+// Modified by the claude-mem-marian fork: retired host routes and cleanup contracts. Upstream attribution is retained.
 import { describe, it, expect, afterEach, spyOn } from 'bun:test';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import {
   buildNoOpResult,
   hookCommand,
@@ -18,7 +22,7 @@ const realStdoutWrite = process.stdout.write;
 function captureStdout(chunks: string[] = []): void {
   process.stdout.write = ((chunk: string, callback: () => void): boolean => {
     chunks.push(String(chunk).replace(/\n$/, ''));
-    callback();
+    callback?.();
     return true;
   }) as typeof process.stdout.write;
 }
@@ -392,5 +396,213 @@ describe('isWorkerUnavailableError', () => {
       expect(isWorkerUnavailableError(null)).toBe(false);
       expect(isWorkerUnavailableError(undefined)).toBe(false);
     });
+  });
+});
+
+describe('hookCommand retired Cursor route (Decision 08)', () => {
+  const realStderrWrite = process.stderr.write;
+
+  function captureStderr(chunks: string[] = []): void {
+    process.stderr.write = ((chunk: string, callback: () => void): boolean => {
+      chunks.push(String(chunk).replace(/\n$/, ''));
+      callback?.();
+      return true;
+    }) as typeof process.stderr.write;
+  }
+
+  afterEach(() => {
+    process.stderr.write = realStderrWrite;
+    delete process.env.CLAUDE_MEM_DISABLE_TOOL_HOOKS;
+    delete process.env.CLAUDE_MEM_DISABLE_OBSERVATION;
+    delete process.env.CLAUDE_MEM_DISABLE_FILE_CONTEXT;
+  });
+
+  for (const event of ['session-init', 'context', 'observation', 'file-edit', 'summarize', 'some-future-event']) {
+    it(`refuses hook cursor ${event} with the exact envelope and no side effects`, async () => {
+      const stdout: string[] = [];
+      const stderr: string[] = [];
+      captureStdout(stdout);
+      captureStderr(stderr);
+      // An open stdin that would hang the test if the refusal ever read it.
+      // Empty payload: a stdin read would block on the safety timeout, failing the test.
+      installOpenFakeStdin("");
+      process.env.CLAUDE_MEM_DISABLE_TOOL_HOOKS = '1';
+      // No settings file may be created (or read into existence) by the refusal.
+      const configDir = mkdtempSync(join(tmpdir(), 'cursor-refusal-config-'));
+      process.env.CLAUDE_CONFIG_DIR = configDir;
+
+      const code = await hookCommand('cursor', event, { skipExit: true });
+
+      expect(code).toBe(0);
+      expect(stdout).toEqual(['{"continue":true}']);
+      expect(stderr).toEqual(['claude-mem: Cursor hooks are retired; no event was captured. Use worker-service cursor status or cursor uninstall from the affected workspace.']);
+      expect(existsSync(join(configDir, 'settings.json'))).toBe(false);
+      rmSync(configDir, { recursive: true, force: true });
+    });
+  }
+
+  it('reserves the cursor token in the adapter registry before the raw default', async () => {
+    const { getPlatformAdapter } = await import('../src/cli/adapters/index.js');
+    expect(() => getPlatformAdapter('cursor')).toThrow(/Cursor hooks are retired/);
+    expect(getPlatformAdapter('some-future-cli')).toBeDefined();
+  });
+});
+
+describe('hookCommand retired Kimi route (Decision 09)', () => {
+  const realStderrWrite = process.stderr.write;
+
+  function captureStderrKimi(chunks: string[] = []): void {
+    process.stderr.write = ((chunk: string, callback: () => void): boolean => {
+      chunks.push(String(chunk).replace(/\n$/, ''));
+      callback?.();
+      return true;
+    }) as typeof process.stderr.write;
+  }
+
+  afterEach(() => {
+    process.stderr.write = realStderrWrite;
+    delete process.env.CLAUDE_MEM_DISABLE_TOOL_HOOKS;
+  });
+
+  for (const event of ['session-init-context', 'observation', 'file-context', 'summarize', 'some-future-event']) {
+    it(`refuses hook kimi ${event} with the exact envelope and no side effects`, async () => {
+      const stdout: string[] = [];
+      const stderr: string[] = [];
+      captureStdout(stdout);
+      captureStderrKimi(stderr);
+      installOpenFakeStdin("");
+      process.env.CLAUDE_MEM_DISABLE_TOOL_HOOKS = '1';
+      const configDir = mkdtempSync(join(tmpdir(), 'kimi-refusal-config-'));
+      process.env.CLAUDE_CONFIG_DIR = configDir;
+
+      const code = await hookCommand('kimi', event, { skipExit: true });
+
+      expect(code).toBe(0);
+      expect(stdout).toEqual(['{"continue":true}']);
+      expect(stderr).toEqual(['claude-mem: Kimi hooks are retired; no event was captured. Use worker-service kimi status or kimi uninstall from the affected workspace.']);
+      expect(existsSync(join(configDir, 'settings.json'))).toBe(false);
+      rmSync(configDir, { recursive: true, force: true });
+    });
+  }
+
+});
+
+describe('hookCommand retired Windsurf route (Decision 10)', () => {
+  const realStderrWrite = process.stderr.write;
+
+  function captureStderrWs(chunks: string[] = []): void {
+    process.stderr.write = ((chunk: string, callback: () => void): boolean => {
+      chunks.push(String(chunk).replace(/\n$/, ''));
+      callback?.();
+      return true;
+    }) as typeof process.stderr.write;
+  }
+
+  afterEach(() => {
+    process.stderr.write = realStderrWrite;
+    delete process.env.CLAUDE_MEM_DISABLE_TOOL_HOOKS;
+  });
+
+  for (const event of ['session-init', 'file-edit', 'observation', 'pre_user_prompt', 'post_write_code', 'post_run_command', 'post_mcp_tool_use', 'post_cascade_response', 'some-future-event']) {
+    it(`refuses hook windsurf ${event} with the exact envelope and no side effects`, async () => {
+      const stdout: string[] = [];
+      const stderr: string[] = [];
+      captureStdout(stdout);
+      captureStderrWs(stderr);
+      installOpenFakeStdin("");
+      process.env.CLAUDE_MEM_DISABLE_TOOL_HOOKS = '1';
+      const configDir = mkdtempSync(join(tmpdir(), 'windsurf-refusal-config-'));
+      process.env.CLAUDE_CONFIG_DIR = configDir;
+
+      const code = await hookCommand('windsurf', event, { skipExit: true });
+
+      expect(code).toBe(0);
+      expect(stdout).toEqual(['{"continue":true}']);
+      expect(stderr).toEqual(['claude-mem: Windsurf hooks are retired; no event was captured. Use npx claude-mem uninstall to review legacy cleanup.']);
+      expect(existsSync(join(configDir, 'settings.json'))).toBe(false);
+      rmSync(configDir, { recursive: true, force: true });
+    });
+  }
+
+  it('never touches stdin, loggers, network, or child processes on the retired route', async () => {
+    const { logger } = await import('../src/utils/logger.js');
+    const logSpies = ['info', 'debug', 'warn', 'error'].map(level => spyOn(logger as any, level).mockImplementation(() => {}));
+    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async () => { throw new Error('network touched'); });
+    const originalStdin = Object.getOwnPropertyDescriptor(process, 'stdin');
+    const touched = (): never => { throw new Error('stdin touched'); };
+    const trap = { isTTY: false, on: touched, once: touched, read: touched, resume: touched, removeListener: () => {} };
+    Object.defineProperty(process, 'stdin', { configurable: true, value: trap });
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    captureStdout(stdout);
+    captureStderrWs(stderr);
+    try {
+      const code = await hookCommand('windsurf', 'post_cascade_response', { skipExit: true });
+      expect(code).toBe(0);
+      expect(stdout).toEqual(['{"continue":true}']);
+      expect(stderr).toHaveLength(1);
+      expect(logSpies.every(spy => spy.mock.calls.length === 0)).toBe(true);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      logSpies.forEach(spy => spy.mockRestore());
+      if (originalStdin) Object.defineProperty(process, 'stdin', originalStdin);
+    }
+  });
+
+  it('never resolves a handler or buffers stderr on the retired route (source-order pin)', async () => {
+    const source = readFileSync(join(__dirname, '..', 'src', 'cli', 'hook-command.ts'), 'utf8');
+    const guard = source.indexOf("isRetiredWindsurfHookPlatform(rawPlatform)");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(source.indexOf('installHookStderrBuffer()'));
+    expect(guard).toBeLessThan(source.indexOf('getEventHandler(event)'));
+  });
+});
+
+describe('hookCommand retired antigravity-cli route (Decision 11)', () => {
+  const realStderrWrite = process.stderr.write;
+
+  function captureStderrAg(chunks: string[] = []): void {
+    process.stderr.write = ((chunk: string, callback: () => void): boolean => {
+      chunks.push(String(chunk).replace(/\n$/, ''));
+      callback?.();
+      return true;
+    }) as typeof process.stderr.write;
+  }
+
+  afterEach(() => {
+    process.stderr.write = realStderrWrite;
+    delete process.env.CLAUDE_MEM_DISABLE_TOOL_HOOKS;
+  });
+
+  for (const token of ['antigravity', 'antigravity-cli']) {
+    for (const event of ['context', 'session-init', 'observation', 'summarize', 'SessionStart', 'PreInvocation', 'PostToolUse', 'PostInvocation', 'Stop', 'PreToolUse', 'some-future-event']) {
+      it(`refuses hook ${token} ${event} with the exact envelope and no side effects`, async () => {
+        const stdout: string[] = [];
+        const stderr: string[] = [];
+        captureStdout(stdout);
+        captureStderrAg(stderr);
+        installOpenFakeStdin("");
+        process.env.CLAUDE_MEM_DISABLE_TOOL_HOOKS = '1';
+        const configDir = mkdtempSync(join(tmpdir(), 'antigravity-refusal-config-'));
+        process.env.CLAUDE_CONFIG_DIR = configDir;
+
+        const code = await hookCommand(token, event, { skipExit: true });
+
+        expect(code).toBe(0);
+        expect(stdout).toEqual(['{"continue":true}']);
+        expect(stderr).toEqual(['claude-mem: antigravity-cli hooks are retired; no event was captured. Use npx claude-mem antigravity-cli status|uninstall to inspect or remove legacy configuration.']);
+        expect(existsSync(join(configDir, 'settings.json'))).toBe(false);
+        rmSync(configDir, { recursive: true, force: true });
+      });
+    }
+  }
+
+  it('never resolves a handler or buffers stderr on the retired route (source-order pin)', async () => {
+    const source = readFileSync(join(__dirname, '..', 'src', 'cli', 'hook-command.ts'), 'utf8');
+    const guard = source.indexOf('isRetiredAntigravityHookPlatform(rawPlatform)');
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(source.indexOf('installHookStderrBuffer()'));
+    expect(guard).toBeLessThan(source.indexOf('getEventHandler(event)'));
   });
 });

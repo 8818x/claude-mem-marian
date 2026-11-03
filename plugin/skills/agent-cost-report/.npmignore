@@ -1,0 +1,5 @@
+# Local historical validation contains transcript- and database-derived spend data.
+VERIFICATION.md
+verification/
+scripts/tests/
+scripts/acr/__pycache__/

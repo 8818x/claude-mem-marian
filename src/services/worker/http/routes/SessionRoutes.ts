@@ -1,3 +1,4 @@
+// Modified by the claude-mem-marian fork: the retired Cursor lazy-observer split is removed; all accepted prompts use the common branch. Upstream attribution is retained.
 
 import express, { Request, Response } from 'express';
 import { z } from 'zod';
@@ -983,8 +984,7 @@ export class SessionRoutes extends BaseRouteHandler {
     recordWorkStatePrompt(store.db, telemetryAttribution, savedUserPromptId);
 
     // Fire-and-forget cloud sync nudge, beside the write itself so every
-    // saved prompt nudges — including cursor sessions, which skip the
-    // non-cursor branch below entirely.
+    // saved prompt nudges.
     this.dbManager.getCloudSync()?.notify();
 
     const contextInjected = this.sessionManager.getSession(sessionDbId) !== undefined;
@@ -995,62 +995,54 @@ export class SessionRoutes extends BaseRouteHandler {
       contextInjected
     });
 
-    if (platformSource !== 'cursor') {
-      const session = this.sessionManager.initializeSession(sessionDbId, sdkPrompt, promptNumber, project);
+    const session = this.sessionManager.initializeSession(sessionDbId, sdkPrompt, promptNumber, project);
 
-      // The row this request saved, by id. A newest-by-timestamp lookup can
-      // return a neighbouring turn saved in the same millisecond.
-      const savedUserPrompt = store.getUserPromptById(savedUserPromptId);
+    // The row this request saved, by id. A newest-by-timestamp lookup can
+    // return a neighbouring turn saved in the same millisecond.
+    const savedUserPrompt = store.getUserPromptById(savedUserPromptId);
 
-      if (savedUserPrompt) {
-        this.eventBroadcaster.broadcastNewPrompt({
-          id: savedUserPrompt.id,
-          content_session_id: savedUserPrompt.content_session_id,
-          project: savedUserPrompt.project,
-          platform_source: savedUserPrompt.platform_source,
-          prompt_number: savedUserPrompt.prompt_number,
-          prompt_text: savedUserPrompt.prompt_text,
-          created_at_epoch: savedUserPrompt.created_at_epoch
+    if (savedUserPrompt) {
+      this.eventBroadcaster.broadcastNewPrompt({
+        id: savedUserPrompt.id,
+        content_session_id: savedUserPrompt.content_session_id,
+        project: savedUserPrompt.project,
+        platform_source: savedUserPrompt.platform_source,
+        prompt_number: savedUserPrompt.prompt_number,
+        prompt_text: savedUserPrompt.prompt_text,
+        created_at_epoch: savedUserPrompt.created_at_epoch
+      });
+
+      const chromaStart = Date.now();
+      const promptText = savedUserPrompt.prompt_text;
+      this.dbManager.getChromaSync()?.syncUserPrompt(
+        savedUserPrompt.id,
+        savedUserPrompt.memory_session_id,
+        savedUserPrompt.project,
+        promptText,
+        savedUserPrompt.prompt_number,
+        savedUserPrompt.created_at_epoch,
+        savedUserPrompt.platform_source
+      ).then(() => {
+        const chromaDuration = Date.now() - chromaStart;
+        const truncatedPrompt = promptText.length > 60
+          ? promptText.substring(0, 60) + '...'
+          : promptText;
+        logger.debug('CHROMA', 'User prompt synced', {
+          promptId: savedUserPrompt.id,
+          duration: `${chromaDuration}ms`,
+          prompt: truncatedPrompt
         });
-
-        const chromaStart = Date.now();
-        const promptText = savedUserPrompt.prompt_text;
-        this.dbManager.getChromaSync()?.syncUserPrompt(
-          savedUserPrompt.id,
-          savedUserPrompt.memory_session_id,
-          savedUserPrompt.project,
-          promptText,
-          savedUserPrompt.prompt_number,
-          savedUserPrompt.created_at_epoch,
-          savedUserPrompt.platform_source
-        ).then(() => {
-          const chromaDuration = Date.now() - chromaStart;
-          const truncatedPrompt = promptText.length > 60
-            ? promptText.substring(0, 60) + '...'
-            : promptText;
-          logger.debug('CHROMA', 'User prompt synced', {
-            promptId: savedUserPrompt.id,
-            duration: `${chromaDuration}ms`,
-            prompt: truncatedPrompt
-          });
-        }).catch((error) => {
-          logChromaWriteFailure('CHROMA', 'User prompt sync failed, continuing without vector search', {
-            promptId: savedUserPrompt.id,
-            prompt: promptText.length > 60 ? promptText.substring(0, 60) + '...' : promptText
-          }, error);
-        });
-      }
-
-      await this.ensureGeneratorRunning(sessionDbId, 'init');
-
-      this.eventBroadcaster.broadcastSessionStarted(sessionDbId, session.project);
-    } else {
-      // Cursor creates its observer lazily, but accepted prompts still update an existing session.
-      if (this.sessionManager.getSession(sessionDbId)) {
-        this.sessionManager.initializeSession(sessionDbId, sdkPrompt, promptNumber, project);
-      }
-      logger.debug('HTTP', 'session-init: Skipping SDK agent init for Cursor platform', { sessionDbId, promptNumber });
+      }).catch((error) => {
+        logChromaWriteFailure('CHROMA', 'User prompt sync failed, continuing without vector search', {
+          promptId: savedUserPrompt.id,
+          prompt: promptText.length > 60 ? promptText.substring(0, 60) + '...' : promptText
+        }, error);
+      });
     }
+
+    await this.ensureGeneratorRunning(sessionDbId, 'init');
+
+    this.eventBroadcaster.broadcastSessionStarted(sessionDbId, session.project);
 
     res.json({
       sessionDbId,

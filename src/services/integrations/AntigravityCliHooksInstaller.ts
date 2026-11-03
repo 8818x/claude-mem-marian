@@ -1,18 +1,11 @@
 
+// Modified by the claude-mem-marian fork: Antigravity CLI active hooks are retired (Decision 11); install/setup reject before writes, and legacy status/uninstall cleanup remains. Upstream attribution is retained.
 import path from 'path';
 import { homedir } from 'os';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
-import { execSync } from 'child_process';
+import { requireMaintainedInstallTarget, UnsupportedInstallTargetError } from '../../shared/integration-id.js';
 import { logger } from '../../utils/logger.js';
-import {
-  getWorkerServiceAbsolutePath as findWorkerServicePath,
-  getBunAbsolutePath as findBunPath,
-  getMcpServerAbsolutePath,
-} from './install-paths.js';
-import { writeMcpJsonConfig, PLACEHOLDER_CONTEXT } from './McpIntegrations.js';
 import { readJsonSafe } from '../../utils/json-utils.js';
-import { injectContextIntoMarkdownFile } from '../../utils/context-injection.js';
-import { ANTIGRAVITY_HOOK_TIMEOUT_MS } from '../../shared/host-hook-limits.js';
 
 // agy hook schema (builtin `agy-customizations/docs/hooks.md`): each top-level
 // key of hooks.json is a hook NAME, mapping to an object of event keys. Only
@@ -99,15 +92,6 @@ const ANTIGRAVITY_MCP_CONFIG_PATHS = [
 const RULES_CONTEXT_PATH = path.join(homedir(), '.agents', 'rules', 'claude-mem-context.md');
 
 const HOOK_NAME = 'claude-mem';
-// agy hook timeouts are in SECONDS ("Execution timeout in seconds. Defaults to
-// 30"). The pre-#4196 installer wrote 10000 here as if it were milliseconds,
-// which agy read as ~2.7 hours instead of 10 seconds. The limit itself lives in
-// host-hook-limits.ts, where the server-runtime SessionStart budget reads it.
-const HOOK_TIMEOUT_SECONDS = ANTIGRAVITY_HOOK_TIMEOUT_MS / 1000;
-// PreToolUse/PostToolUse are the only events that use the grouped
-// { matcher, hooks } shape; the rest are flat handler arrays (agy 1.2.13
-// builtin docs/hooks.md, "Supported Event Types").
-const ANTIGRAVITY_GROUPED_EVENTS = new Set<string>(['PreToolUse', 'PostToolUse']);
 
 // The 5 hook events claude-mem registers in `agy`, mapped to its internal handlers:
 //   - SessionStart   → context     (inject startup memory once when a session starts;
@@ -144,96 +128,9 @@ const ANTIGRAVITY_EVENT_TO_INTERNAL_EVENT: Record<string, string> = {
   'Stop': 'summarize',
 };
 
-// `agy` splits a hook command string on spaces and does NOT strip quotes, so a
-// quoted path makes bun receive a literal `"C:/path/bun"` argument and fail
-// with "File not found" (verified on a live install — quoted paths broke every
-// hook with exit status 1). On Windows, a space inside the path can't be
-// quoted away either, so resolve the 8.3 short path to remove the space; if 8.3
-// generation is disabled we fall back to the raw path with a warning rather
-// than blocking the install. `%I`, not `%~I`: this runs at the cmd command
-// line, where `%~I` is a syntax error ("%~I was unexpected at this time"),
-// so every lookup failed and paths with spaces were never shortened.
-// Exported for tests.
-export function toSpaceFreePath(filePath: string): string {
-  if (!filePath.includes(' ')) return filePath;
-  if (process.platform !== 'win32') {
-    console.warn(
-      `  WARNING: Antigravity CLI hook path contains spaces: ${filePath}\n` +
-      `  agy splits commands on spaces, so hooks may fail to launch.\n` +
-      `  Move bun or the plugin to a path without spaces.`,
-    );
-    return filePath;
-  }
-  try {
-    const shortPath = execSync(
-      `for %I in ("${filePath}") do @echo %~sI`,
-      { shell: 'cmd.exe', encoding: 'utf-8', stdio: ['pipe', 'pipe', 'ignore'] },
-    ).trim();
-    if (shortPath && !shortPath.includes(' ')) return shortPath;
-  } catch (error) {
-    if (error instanceof Error) {
-      logger.error('WORKER', 'Failed to resolve Windows 8.3 short path', { path: filePath }, error);
-    }
-  }
-  console.warn(
-    `  WARNING: Antigravity CLI hook path contains spaces and 8.3 short-path\n` +
-    `  resolution failed: ${filePath}\n` +
-    `  agy splits commands on spaces, so hooks may fail to launch.`,
-  );
-  return filePath;
-}
 
-function buildHookCommand(
-  bunPath: string,
-  workerServicePath: string,
-  antigravityEventName: string,
-): string {
-  const internalEvent = ANTIGRAVITY_EVENT_TO_INTERNAL_EVENT[antigravityEventName];
-  if (!internalEvent) {
-    throw new Error(`Unknown Antigravity CLI event: ${antigravityEventName}`);
-  }
 
-  // Emit bare, forward-slashed paths (see toSpaceFreePath): agy does not run the
-  // command through a shell, so quotes are taken literally and backslashes are
-  // fragile.
-  const formattedBunPath = toSpaceFreePath(bunPath).replace(/\\/g, '/');
-  const formattedWorkerPath = toSpaceFreePath(workerServicePath).replace(/\\/g, '/');
 
-  return `${formattedBunPath} ${formattedWorkerPath} hook antigravity-cli ${internalEvent}`;
-}
-
-function createHookHandler(
-  bunPath: string,
-  workerServicePath: string,
-  antigravityEventName: string,
-): AntigravityHookHandler {
-  return {
-    type: 'command',
-    command: buildHookCommand(bunPath, workerServicePath, antigravityEventName),
-    timeout: HOOK_TIMEOUT_SECONDS,
-  };
-}
-
-// Build the canonical agy hooks.json fragment for claude-mem. Top-level key is
-// the hook NAME (`claude-mem`); each event uses the shape agy expects — grouped
-// (matcher + hooks) for PreToolUse/PostToolUse, flat handler arrays for
-// SessionStart/PostInvocation/Stop. Exported for the schema contract tests
-// (issue #4196, #4911).
-export function buildAntigravityHooksConfig(
-  bunPath: string,
-  workerServicePath: string,
-): AntigravityHooksConfig {
-  const namedHook: Record<string, unknown> = {};
-
-  for (const event of Object.keys(ANTIGRAVITY_EVENT_TO_INTERNAL_EVENT)) {
-    const handler = createHookHandler(bunPath, workerServicePath, event);
-    namedHook[event] = ANTIGRAVITY_GROUPED_EVENTS.has(event)
-      ? [{ matcher: '*', hooks: [handler] }]
-      : [handler];
-  }
-
-  return { [HOOK_NAME]: namedHook as AntigravityNamedHook };
-}
 
 function readAntigravitySettings(): AntigravitySettingsJson {
   if (!existsSync(GEMINI_SETTINGS_PATH)) {
@@ -289,34 +186,6 @@ function writeAntigravityHooksConfig(hooksConfig: AntigravityHooksConfig): void 
   writeFileSync(GEMINI_HOOKS_CONFIG_PATH, JSON.stringify(hooksConfig, null, 2) + '\n');
 }
 
-// Merge claude-mem's named hook into an existing hooks.json, preserving other
-// named hooks the user or other tools registered. For the `claude-mem` hook the
-// event dimensions we own are replaced (idempotent re-installs), while any
-// other event keys on that named hook are left intact.
-function mergeNamedHook(
-  existing: AntigravityNamedHook | undefined,
-  incoming: AntigravityNamedHook,
-): AntigravityNamedHook {
-  const merged: Record<string, unknown> = { ...(existing ?? {}) };
-
-  // Prior versions of claude-mem (#4057) mapped context to PreInvocation,
-  // which injected context on every turn and invalidated prefix caching (#4911).
-  // Drop whatever PreInvocation entry the hook has; the loop below re-adds the
-  // current session-init mapping, so a stale `context` handler never survives.
-  delete merged.PreInvocation;
-  // Prior versions also registered PreToolUse, which auto-approved every tool
-  // call (#5078).
-  delete merged.PreToolUse;
-
-  for (const event of Object.keys(ANTIGRAVITY_EVENT_TO_INTERNAL_EVENT)) {
-    const value = (incoming as Record<string, unknown>)[event];
-    if (value !== undefined) {
-      merged[event] = value;
-    }
-  }
-
-  return merged as AntigravityNamedHook;
-}
 
 // Remove entries written by the pre-#4196 event-keyed layout (top-level keys are
 // event names, handlers carry `name: 'claude-mem'`). Returns the number of
@@ -348,146 +217,12 @@ export function stripLegacyEventHooks(config: AntigravityHooksConfig): number {
   return removed;
 }
 
-export function mergeHooksIntoConfig(
-  existingConfig: AntigravityHooksConfig,
-  newHooks: AntigravityHooksConfig,
-): AntigravityHooksConfig {
-  const config: AntigravityHooksConfig = { ...existingConfig };
 
-  // Migrate any legacy event-keyed claude-mem entries first so the old and new
-  // layouts never coexist after an upgrade. stripLegacyEventHooks replaces the
-  // affected top-level keys, so the caller's object is left untouched.
-  stripLegacyEventHooks(config);
 
-  for (const [hookName, incoming] of Object.entries(newHooks)) {
-    config[hookName] = mergeNamedHook(config[hookName], incoming);
-  }
 
-  return config;
-}
 
-function setupGeminiMdContextSection(): void {
-  const contextTag = '<claude-mem-context>';
-  const contextEndTag = '</claude-mem-context>';
-  const placeholder = `${contextTag}
-# Memory Context from Past Sessions
 
-*No context yet. Complete your first session and context will appear here.*
-${contextEndTag}`;
 
-  let content = '';
-  if (existsSync(GEMINI_MD_PATH)) {
-    content = readFileSync(GEMINI_MD_PATH, 'utf-8');
-  }
-
-  if (content.includes(contextTag)) {
-    return;
-  }
-
-  const separator = content.length > 0 && !content.endsWith('\n') ? '\n\n' : content.length > 0 ? '\n' : '';
-  const newContent = content + separator + placeholder + '\n';
-
-  mkdirSync(GEMINI_CONFIG_DIR, { recursive: true });
-  writeFileSync(GEMINI_MD_PATH, newContent);
-}
-
-// B0 found `~/.gemini/config/mcp_config.json` existing but genuinely empty (0
-// bytes) on a live machine — a fresh placeholder created alongside the CLI's
-// app-data dir, not corrupt data. readJsonSafe (reused by writeMcpJsonConfig)
-// intentionally throws on empty files to prevent data loss on real corruption
-// elsewhere — that contract must stay intact for every other caller. Here we
-// only pre-seed a *zero-byte* file with `{}` immediately before delegating to
-// the shared writer, so an empty placeholder doesn't get misread as corrupt.
-function seedEmptyMcpConfigFile(mcpConfigPath: string): void {
-  if (existsSync(mcpConfigPath) && readFileSync(mcpConfigPath, 'utf-8').trim() === '') {
-    writeFileSync(mcpConfigPath, '{}\n');
-  }
-}
-
-function registerAntigravityMcp(): void {
-  const mcpServerPath = getMcpServerAbsolutePath();
-  if (!mcpServerPath) {
-    console.error('Could not find MCP server script');
-    console.error('   Expected at: ~/.claude/plugins/marketplaces/thedotmack/plugin/scripts/mcp-server.cjs');
-    throw new Error('MCP server script not found');
-  }
-
-  for (const mcpConfigPath of ANTIGRAVITY_MCP_CONFIG_PATHS) {
-    seedEmptyMcpConfigFile(mcpConfigPath);
-    writeMcpJsonConfig(mcpConfigPath, mcpServerPath);
-    console.log(`  MCP config written to: ${mcpConfigPath}`);
-  }
-}
-
-function setupRulesContextFile(): void {
-  injectContextIntoMarkdownFile(RULES_CONTEXT_PATH, PLACEHOLDER_CONTEXT);
-  console.log(`  Context placeholder written to: ${RULES_CONTEXT_PATH}`);
-}
-
-export async function installAntigravityCliHooks(): Promise<number> {
-  console.log('\nInstalling Claude-Mem Antigravity CLI hooks + MCP...\n');
-
-  const workerServicePath = findWorkerServicePath();
-  if (!workerServicePath) {
-    console.error('Could not find worker-service.cjs');
-    console.error('   Expected at: ~/.claude/plugins/marketplaces/thedotmack/plugin/scripts/worker-service.cjs');
-    return 1;
-  }
-
-  const bunPath = findBunPath();
-  console.log(`  Using Bun runtime: ${bunPath}`);
-  console.log(`  Worker service: ${workerServicePath}`);
-
-  try {
-    const hooksConfig = buildAntigravityHooksConfig(bunPath, workerServicePath);
-
-    const existingHooks = readAntigravityHooksConfig();
-    const mergedHooks = mergeHooksIntoConfig(existingHooks, hooksConfig);
-
-    writeAntigravityHooksAndSetupContext(mergedHooks);
-    registerAntigravityMcp();
-    setupRulesContextFile();
-
-    console.log(`
-Installation complete!
-
-Hooks installed to:    ${GEMINI_HOOKS_CONFIG_PATH}
-MCP config installed to:
-  ${ANTIGRAVITY_MCP_CONFIG_PATHS.join('\n  ')}
-Using unified CLI: bun worker-service.cjs hook antigravity-cli <event>
-
-Next steps:
-  1. Start claude-mem worker: claude-mem start
-  2. Restart Antigravity CLI (agy) to load the hooks
-  3. Memory will be captured automatically during sessions
-
-Context Injection:
-  Context from past sessions is injected via ${GEMINI_MD_PATH}
-  and ${RULES_CONTEXT_PATH}, and automatically included in Antigravity CLI conversations.
-`);
-
-    return 0;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`\nInstallation failed: ${message}`);
-    return 1;
-  }
-}
-
-function writeAntigravityHooksAndSetupContext(mergedHooks: AntigravityHooksConfig): void {
-  writeAntigravityHooksConfig(mergedHooks);
-  console.log(`  Merged hooks into ${GEMINI_HOOKS_CONFIG_PATH}`);
-
-  setupGeminiMdContextSection();
-  console.log(`  Setup context injection in ${GEMINI_MD_PATH}`);
-
-  const eventNames = Object.keys(ANTIGRAVITY_EVENT_TO_INTERNAL_EVENT);
-  console.log(`  Registered ${eventNames.length} hook events:`);
-  for (const event of eventNames) {
-    const internalEvent = ANTIGRAVITY_EVENT_TO_INTERNAL_EVENT[event];
-    console.log(`    ${event} → ${internalEvent}`);
-  }
-}
 
 // Same empty-file tolerance as seedEmptyMcpConfigFile above, for read paths
 // (status check + uninstall) that don't go through writeMcpJsonConfig. A
@@ -536,6 +271,10 @@ export function uninstallAntigravityCliHooks(): number {
       removeAntigravityHooksFromSettings();
     }
 
+    if (removeContextTagBlock(GEMINI_MD_PATH)) {
+      console.log(`  Removed context section from ${GEMINI_MD_PATH}`);
+    }
+
     for (const mcpConfigPath of ANTIGRAVITY_MCP_CONFIG_PATHS) {
       const removed = removeClaudeMemFromMcpConfig(mcpConfigPath);
       if (removed) {
@@ -573,13 +312,9 @@ function removeAntigravityHooksFromHooksConfig(): void {
   }
 
   const { config: cleanedConfig, removed: removedCount } = removeClaudeMemHooks(config);
-
+  if (removedCount === 0 && JSON.stringify(cleanedConfig) === JSON.stringify(config)) return;
   writeAntigravityHooksConfig(cleanedConfig);
   console.log(`  Removed ${removedCount} claude-mem hook(s) from ${GEMINI_HOOKS_CONFIG_PATH}`);
-
-  if (removeContextTagBlock(GEMINI_MD_PATH)) {
-    console.log(`  Removed context section from ${GEMINI_MD_PATH}`);
-  }
 }
 
 function removeAntigravityHooksFromSettings(): void {
@@ -610,11 +345,9 @@ function removeAntigravityHooksFromSettings(): void {
     delete settings.hooks;
   }
 
-  writeAntigravitySettings(settings);
-  console.log(`  Removed ${removedCount} claude-mem hook(s) from ${GEMINI_SETTINGS_PATH}`);
-
-  if (removeContextTagBlock(GEMINI_MD_PATH)) {
-    console.log(`  Removed context section from ${GEMINI_MD_PATH}`);
+  if (removedCount > 0) {
+    writeAntigravitySettings(settings);
+    console.log(`  Removed ${removedCount} claude-mem hook(s) from ${GEMINI_SETTINGS_PATH}`);
   }
 }
 
@@ -703,9 +436,9 @@ export function checkAntigravityCliHooksStatus(): number {
   console.log('\nClaude-Mem Antigravity CLI Status\n');
 
   if (!existsSync(GEMINI_HOOKS_CONFIG_PATH)) {
-    console.log('Antigravity CLI hooks.json: Not found');
+    console.log('Antigravity CLI legacy hooks.json: not detected');
     console.log(`  Expected at: ${GEMINI_HOOKS_CONFIG_PATH}\n`);
-    console.log('No hooks installed. Run: claude-mem install --ide antigravity\n');
+    console.log('No legacy claude-mem hooks detected. Active capture is retired; new installations are not supported.');
     return 0;
   }
 
@@ -722,11 +455,11 @@ export function checkAntigravityCliHooksStatus(): number {
   const { installedEvents, legacyHandlerCount, hasStalePreInvocation } = describeAntigravityHooks(hooksConfig);
 
   if (installedEvents.length === 0 && !hasStalePreInvocation) {
-    console.log('Hooks: Not installed');
-    console.log('Run: claude-mem install --ide antigravity\n');
+    console.log('Legacy claude-mem hooks: not detected');
+    console.log('Active capture is retired; new installations are not supported.');
   } else {
     console.log(`Hooks config: ${GEMINI_HOOKS_CONFIG_PATH}`);
-    console.log(`Mode: Unified CLI (bun worker-service.cjs hook antigravity-cli)`);
+    console.log(`Detected legacy configuration: unified CLI (bun worker-service.cjs hook antigravity-cli); active capture is retired`);
     console.log(`Events: ${installedEvents.length} of ${Object.keys(ANTIGRAVITY_EVENT_TO_INTERNAL_EVENT).length} mapped`);
     for (const event of installedEvents) {
       const internalEvent = ANTIGRAVITY_EVENT_TO_INTERNAL_EVENT[event] ?? 'unknown';
@@ -737,21 +470,21 @@ export function checkAntigravityCliHooksStatus(): number {
   // A pre-#4911 install leaves a named PreInvocation handler that injects context
   // on every invocation, busting prefix cache. Warn the user to migrate.
   if (hasStalePreInvocation) {
-    console.log(`\nStale hooks: PreInvocation context handler found (pre-#4911). This invalidates LLM prefix caching on every invocation.`);
-    console.log('Re-run install to migrate: claude-mem install --ide antigravity\n');
+    console.log('Stale hooks: legacy PreInvocation context handler found (pre-#4911 configuration shape); active capture is retired.');
+    console.log('Automatic hook migration is unavailable; existing configuration was left unchanged.\n');
   }
 
   // A pre-#4196 install leaves claude-mem under top-level event keys, which agy
   // ignores. Point at the migration whenever any are left, including next to a
   // current install.
   if (legacyHandlerCount > 0) {
-    console.log(`Legacy hooks: ${legacyHandlerCount} pre-#4196 event-keyed claude-mem hook(s) found. Re-run install to migrate them.\n`);
+    console.log(`Legacy hooks: ${legacyHandlerCount} pre-#4196 event-keyed claude-mem hook(s) found. Existing configuration was left unchanged.\n`);
   }
 
   if (existsSync(GEMINI_MD_PATH)) {
     const mdContent = readFileSync(GEMINI_MD_PATH, 'utf-8');
     if (mdContent.includes('<claude-mem-context>')) {
-      console.log(`Context (GEMINI.md): Active (${GEMINI_MD_PATH})`);
+      console.log(`Context (GEMINI.md): legacy claude-mem section present (${GEMINI_MD_PATH}); automatic updates are retired`);
     } else {
       console.log('Context (GEMINI.md): exists but missing claude-mem section');
     }
@@ -767,18 +500,24 @@ export function checkAntigravityCliHooksStatus(): number {
     }
     const config = readMcpConfigTolerantly(mcpConfigPath);
     const hasEntry = Boolean(config.mcpServers?.['claude-mem']);
-    console.log(`MCP config (${mcpConfigPath}): ${hasEntry ? 'claude-mem registered' : 'found, but no claude-mem entry'}`);
+    console.log(`MCP config (${mcpConfigPath}): ${hasEntry ? 'legacy claude-mem entry present' : 'found, but no claude-mem entry'}`);
   }
 
   console.log('');
   return 0;
 }
 
-export async function handleAntigravityCliCommand(subcommand: string, _args: string[]): Promise<number> {
+export async function handleAntigravityCliCommand(subcommand: string | undefined, _args: string[]): Promise<number> {
+  if (subcommand === 'install' || subcommand === 'setup') {
+    try {
+      requireMaintainedInstallTarget('antigravity-cli');
+    } catch (error: unknown) {
+      if (!(error instanceof UnsupportedInstallTargetError)) throw error;
+      console.error(error.message);
+      return 1;
+    }
+  }
   switch (subcommand) {
-    case 'install':
-      return installAntigravityCliHooks();
-
     case 'uninstall':
       return uninstallAntigravityCliHooks();
 
@@ -789,17 +528,15 @@ export async function handleAntigravityCliCommand(subcommand: string, _args: str
       console.log(`
 Claude-Mem Antigravity CLI Integration
 
-Usage: claude-mem antigravity-cli <command>
+Usage: claude-mem antigravity-cli <status|uninstall>
 
 Commands:
-  install             Install hooks into ~/.gemini/config/hooks.json + MCP config
-  uninstall           Remove claude-mem hooks/MCP entries (preserves other config)
-  status              Check installation status
+  uninstall           Remove legacy claude-mem hooks/MCP entries (preserves other config)
+  status              Detect legacy artifacts; active capture is retired
 
 Examples:
-  claude-mem antigravity-cli install     # Install hooks + MCP
-  claude-mem antigravity-cli status      # Check if installed
-  claude-mem antigravity-cli uninstall   # Remove hooks + MCP
+  npx claude-mem antigravity-cli status      # Inspect legacy configuration
+  npx claude-mem antigravity-cli uninstall   # Remove legacy hooks + MCP
 
 For more info: https://docs.claude-mem.ai/antigravity-cli/setup
       `);

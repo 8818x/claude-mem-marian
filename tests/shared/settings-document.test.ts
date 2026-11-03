@@ -1,12 +1,21 @@
 import { describe, expect, it, setSystemTime } from 'bun:test';
-import { chmodSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import {
   classifySettingsDocument,
   ensureSettingsDocument,
+  pruneCorruptSettingsQuarantine,
   updateSettingsDocument,
 } from '../../src/shared/settings-document.js';
+
+// Task 43 (Decision 16): bounded quarantine pruning. Synthetic fixtures only.
+const NOW = Date.parse('2026-11-01T12:00:00.000Z');
+const mkCorrupt = (dir: string, ms: number, suffix = ''): string => {
+  const name = `settings.json.corrupt-${ms}${suffix}`;
+  writeFileSync(join(dir, name), `bytes-${ms}`);
+  return name;
+};
 
 const tempFile = (value?: string): string => {
   const dir = mkdtempSync(join(tmpdir(), 'settings-document-'));
@@ -123,5 +132,93 @@ describe('settings document boundary', () => {
     const path = tempFile(JSON.stringify({ theme: 'dark', env: { CLAUDE_MEM_MODEL: 'old', KEEP: 'yes' } }));
     updateSettingsDocument(path, {}, {}, target => { target.CLAUDE_MEM_MODEL = 'new'; });
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ theme: 'dark', env: { CLAUDE_MEM_MODEL: 'new', KEEP: 'yes' } });
+  });
+});
+
+describe('Decision 16: quarantine pruning', () => {
+  const fixtureDir = (): string => mkdtempSync(join(tmpdir(), 't43-quarantine-'));
+
+  it('keeps the 3 newest fresh files and prunes the rest and anything older than 7 days', () => {
+    const dir = fixtureDir();
+    const path = join(dir, 'settings.json');
+    mkCorrupt(dir, NOW - 1_000, '-1');
+    mkCorrupt(dir, NOW - 2_000);
+    mkCorrupt(dir, NOW - 3_000, '-2');
+    mkCorrupt(dir, NOW - 4_000, '-3');
+    mkCorrupt(dir, NOW - 8 * 24 * 3_600_000);
+    const failures = pruneCorruptSettingsQuarantine(path, NOW);
+    expect(failures).toEqual([]);
+    const left = readdirSync(dir).sort();
+    expect(left).toEqual([
+      'settings.json.corrupt-' + (NOW - 3_000) + '-2',
+      'settings.json.corrupt-' + (NOW - 2_000),
+      'settings.json.corrupt-' + (NOW - 1_000) + '-1',
+    ]);
+  });
+
+  it('a failed deletion keeps the file and reports only its name', async () => {
+    const dir = fixtureDir();
+    const path = join(dir, 'settings.json');
+    const name = mkCorrupt(dir, NOW - 8 * 24 * 3_600_000);
+    const full = join(dir, name);
+    // Deterministic deletion failure: hold an exclusive (share-mode None)
+    // handle from a short-lived PowerShell child so unlinkSync must fail.
+    // The child retries the Open until it succeeds (the file exists, not held).
+    const script = [
+      `for($i=0; $i -lt 200; $i++){ try { $fs = [System.IO.File]::Open('${full.replace(/'/g, "''")}','Open','Read','None'); break } catch { Start-Sleep -Milliseconds 100 } }`,
+      'Start-Sleep -Seconds 12',
+      "$fs.Close()",
+    ].join('; ');
+    const child = Bun.spawn(['powershell.exe', '-NoProfile', '-Command', script], { stdout: 'ignore', stderr: 'ignore' });
+    // Wait until the exclusive handle is actually held: probe with a raw
+    // unlink; once it answers EBUSY the CURRENT file instance is locked.
+    // (Generous budgets: bun test runs suites in parallel and PowerShell
+    // start-up lags under load.)
+    let locked = false;
+    for (let i = 0; i < 150 && !locked; i++) {
+      try {
+        unlinkSync(full);
+        writeFileSync(full, 'bytes-locked-43');
+      } catch {
+        locked = true;
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    expect(locked).toBe(true);
+    const failures = pruneCorruptSettingsQuarantine(path, NOW);
+    child.kill();
+    await child.exited;
+    expect(failures.length).toBe(1);
+    expect(failures[0]).toBe(name);
+    expect(existsSync(full)).toBe(true);
+  }, 120_000);
+
+  it('skips symlinks, directories, malformed names, and subdirectory matches (no recursion)', () => {
+    const dir = fixtureDir();
+    const path = join(dir, 'settings.json');
+    // Malformed: 12-digit timestamp, wrong base name.
+    writeFileSync(join(dir, 'settings.json.corrupt-000000123456'), 'x');
+    writeFileSync(join(dir, 'other.json.corrupt-' + (NOW - 8 * 24 * 3_600_000)), 'x');
+    // Subdirectory named like a quarantine file: never recursed into.
+    mkdirSync(join(dir, 'settings.json.corrupt-' + (NOW - 8 * 24 * 3_600_000) + '-d'), { recursive: true });
+    const failures = pruneCorruptSettingsQuarantine(path, NOW);
+    expect(failures).toEqual([]);
+    expect(existsSync(join(dir, 'settings.json.corrupt-000000123456'))).toBe(true);
+    expect(existsSync(join(dir, 'other.json.corrupt-' + (NOW - 8 * 24 * 3_600_000)))).toBe(true);
+    expect(existsSync(join(dir, 'settings.json.corrupt-' + (NOW - 8 * 24 * 3_600_000) + '-d'))).toBe(true);
+  });
+
+  it('never touches a normal settings.json and runs after a successful quarantined replacement', () => {
+    const dir = fixtureDir();
+    const path = join(dir, 'settings.json');
+    writeFileSync(path, '{"CLAUDE_MEM_MODEL":"old"');
+    const result = updateSettingsDocument(path, { CLAUDE_MEM_MODEL: 'new' }, {}, undefined, { quarantineCorrupt: true });
+    expect(result.status).toBe('created');
+    expect(existsSync(result.quarantinedTo!)).toBe(true);
+    expect(readFileSync(result.quarantinedTo!, 'utf8')).toBe('{"CLAUDE_MEM_MODEL":"old"');
+    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ CLAUDE_MEM_MODEL: 'new' });
+    // The just-quarantined file is the newest and fresh — it survives pruning.
+    expect(readdirSync(dir).filter(n => n.includes('corrupt')).length).toBe(1);
   });
 });

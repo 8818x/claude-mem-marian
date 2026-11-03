@@ -11,7 +11,6 @@ mock.module(source('services/integrations/TelegramNotifier.ts'), () => ({ notify
 mock.module(source('services/integrations/GrokBotAwarenessPusher.ts'), () => ({ notifyGrokBotAwareness: () => Promise.resolve() }));
 mock.module(source('services/integrations/GrokBotBrainbeat.ts'), () => ({ notifyGrokBotBrainbeat: () => Promise.resolve() }));
 mock.module(source('services/integrations/GrokBotIndexWriter.ts'), () => ({ notifyGrokBotIndex: () => {} }));
-mock.module(source('services/integrations/CursorHooksInstaller.ts'), () => ({ updateCursorContextForProject: () => Promise.resolve() }));
 
 const { SettingsDefaultsManager } = await import(source('shared/SettingsDefaultsManager.ts'));
 SettingsDefaultsManager.loadFromFile = () => ({

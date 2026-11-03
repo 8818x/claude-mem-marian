@@ -3,6 +3,10 @@ title: "Cursor + Gemini Setup"
 description: "Use Claude-Mem in Cursor with your Gemini API key"
 ---
 
+<Note>
+**Modified by the claude-mem-marian fork:** Cursor hook support is retired; the steps below are historical. Gemini remains a supported observation provider for maintained Claude Code and Codex CLI installs — see [Installation](/installation).
+</Note>
+
 # Cursor + Gemini Setup
 
 Use your Google Gemini key so memory notes run off-plan (they do not spend your Claude subscription). You do **not** clone the repo.
@@ -16,7 +20,7 @@ Use your Google Gemini key so memory notes run off-plan (they do not spend your 
 npx claude-mem install
 ```
 
-Pick **Cursor**, then pick **Gemini** as the memory provider and paste the key.
+Select Claude Code or Codex CLI, then choose **Gemini** as the memory provider and paste the key.
 
 <Warning>
 `npm install -g claude-mem` is the library only. Always install with `npx claude-mem install`.
@@ -34,7 +38,7 @@ cat > ~/.claude-mem/settings.json << 'EOF'
 EOF
 ```
 
-Then re-run `npx claude-mem install` so Cursor hooks and the worker are in place. Do not restart a healthy worker.
+Then re-run installation for the maintained host so its configuration uses the Gemini provider. Do not restart a healthy worker.
 
 ## Restart Cursor
 

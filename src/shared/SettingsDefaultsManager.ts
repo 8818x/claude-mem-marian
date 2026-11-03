@@ -390,7 +390,7 @@ export interface SettingsDefaults {
   CLAUDE_MEM_GROK_BOT_INJECT_STANDING_LINE: string;
   // CCS Align (Worker Watch seat, Phase 0 breathing slice). Seat-owned middle
   // cache under ~/.claude-mem/ccs-align/<viewerId>/; pull-only, never a second
-  // writer on LFG/Orifice logs. See plans/2026-09-09-ccs-align.md.
+  // writer on LFG/Orifice logs. See docs/upstream/plans/2026-09-09-ccs-align.md.
   CLAUDE_MEM_CCS_ALIGN_ENABLED: string;
   CLAUDE_MEM_CCS_ALIGN_VIEWER_IDS: string;
   CLAUDE_MEM_CCS_ALIGN_TRIGGER_TYPES: string;

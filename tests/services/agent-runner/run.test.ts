@@ -1,5 +1,5 @@
 // Modified by the Marian fork: preserve fail-closed diagnostics for unsupported Windows backends.
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { setFakeSpawn } from '../../helpers/fake-spawn.js';
 import { EventEmitter } from 'events';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'fs';
@@ -482,5 +482,108 @@ describe('agent runner', () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(1400);
     expect(result.state).toBe('ok');
     expect(calls[0].child.killed).toBe(false);
+  });
+});
+
+// Task 43 (Decision 16): per-backend runner environments built by the default
+// buildEnv — production construction, spawn-captured via the fake spawn.
+describe('Decision 16: per-backend runner environments', () => {
+  const FILE_43 = mkdtempSync(join(tmpdir(), 't43-runner-env-')) + '/.env';
+  const savedEnv: Array<[string, string | undefined]> = [];
+
+  function setSentinel(name: string, value: string): void {
+    savedEnv.push([name, process.env[name]]);
+    process.env[name] = value;
+  }
+
+  function restoreSentinels(): void {
+    while (savedEnv.length) {
+      const [name, value] = savedEnv.pop()!;
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+      }
+  }
+
+  beforeAll(() => {
+    writeFileSync(FILE_43, [
+      'ANTHROPIC_API_KEY=file-anthropic-key-43',
+      'ANTHROPIC_FALLBACK_API_KEY=file-fallback-43',
+      'ANTHROPIC_BASE_URL=https://file-gateway-43.example',
+      'ANTHROPIC_AUTH_TOKEN=file-auth-token-43',
+      'GEMINI_API_KEY=file-gemini-selected-43',
+      'GEMINI_API_KEYS=file-pool-a,file-pool-b',
+      'OPENROUTER_API_KEY=file-openrouter-43',
+      'OPENROUTER_API_KEYS=file-or-pool-a,file-or-pool-b',
+      'OPENAI_COMPAT_API_KEY=file-openai-43',
+      'OPENAI_COMPAT_API_KEYS=file-oc-pool-a,file-oc-pool-b',
+    ].join('\n') + '\n', { mode: 0o600 });
+    process.env.CLAUDE_MEM_ENV_FILE = FILE_43;
+  });
+
+  afterAll(() => {
+    restoreSentinels();
+    rmSync(FILE_43, { force: true });
+    delete process.env.CLAUDE_MEM_ENV_FILE;
+  });
+
+  afterEach(restoreSentinels);
+
+  it('codex-exec runner: runtime+proxy+CODEX_HOME only; no Anthropic/OAuth/cloud/provider credentials', async () => {
+    setSentinel('CODEX_HOME', join(tmpdir(), 'codex-home-43'));
+    setSentinel('AWS_SECRET_ACCESS_KEY', 'sentinel-aws-secret-43');
+    setSentinel('GITHUB_TOKEN', 'ghp_sentinel4343434343434343434343434343434343');
+    setSentinel('DATABASE_URL', 'postgres://u:pw-43@h/db');
+    setSentinel('CLAUDE_CODE_OAUTH_TOKEN', 'sentinel-oauth-43');
+    const cwd = mkdtempSync(join(tmpdir(), 't43-runner-codex-'));
+    try {
+      const calls: SpawnCall[] = [];
+      const spawnImpl = fakeSpawn(calls, call => {
+        writeFileSync(call.args[call.args.indexOf('-o') + 1], '{"ok":true}');
+        call.child.emit('close', 0);
+      });
+      const result = await runTask(task(cwd), { detect: async () => agents('codex'), query: neverQuery, spawn: spawnImpl });
+      expect(result.state).toBe('ok');
+      const spawned = calls[0].options.env as Record<string, string>;
+      expect(spawned.CLAUDE_MEM_INTERNAL).toBe('1');
+      expect(spawned.CODEX_HOME).toBe(join(tmpdir(), 'codex-home-43'));
+      expect(spawned.PATH).toBeDefined();
+      expect(spawned.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(spawned.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+      expect(spawned.ANTHROPIC_BASE_URL).toBeUndefined();
+      expect(spawned.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+      expect(spawned.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+      expect(spawned.GITHUB_TOKEN).toBeUndefined();
+      expect(spawned.DATABASE_URL).toBeUndefined();
+      expect(spawned.GEMINI_API_KEY).toBeUndefined();
+      expect(spawned.OPENROUTER_API_KEY).toBeUndefined();
+      expect(spawned.OPENAI_COMPAT_API_KEY).toBeUndefined();
+      expect(spawned.GEMINI_API_KEYS).toBeUndefined();
+      expect(spawned.OPENROUTER_API_KEYS).toBeUndefined();
+      expect(spawned.OPENAI_COMPAT_API_KEYS).toBeUndefined();
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
+  });
+
+  it('gemini runner: selected GEMINI_API_KEY + policy path, no pools, no other providers', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 't43-runner-gemini-'));
+    try {
+      const calls: SpawnCall[] = [];
+      const spawnImpl = fakeSpawn(calls, call => {
+        call.child.stdout.emit('data', Buffer.from(JSON.stringify({ response: 'ok-43' })));
+        call.child.emit('close', 0);
+        });
+      const result = await runTask(task(cwd), { detect: async () => agents('gemini'), query: neverQuery, spawn: spawnImpl });
+      expect(result.state).toBe('ok');
+      const spawned = calls[0].options.env as Record<string, string>;
+      expect(spawned.CLAUDE_MEM_INTERNAL).toBe('1');
+      expect(spawned.GEMINI_API_KEY).toBe('file-gemini-selected-43');
+      expect(spawned.GEMINI_API_KEYS).toBeUndefined();
+      expect(spawned.OPENROUTER_API_KEY).toBeUndefined();
+      expect(spawned.OPENAI_COMPAT_API_KEY).toBeUndefined();
+      expect(spawned.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(spawned.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+      expect(spawned.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+      expect(spawned.GITHUB_TOKEN).toBeUndefined();
+      expect(spawned.GEMINI_CLI_SYSTEM_SETTINGS_PATH).toBeDefined();
+    } finally { rmSync(cwd, { recursive: true, force: true }); }
   });
 });

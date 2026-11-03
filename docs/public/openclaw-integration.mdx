@@ -4,6 +4,10 @@ description: Persistent memory for OpenClaw agents — observation recording, sy
 icon: dragon
 ---
 
+<Warning>
+**Modified by the claude-mem-marian fork:** This inherited page is legacy reference only; Marian does not maintain new OpenClaw host installs. The `install.cmem.ai/openclaw.sh` endpoint is external to this repository and is not maintained or verified here. This fork's own `npx claude-mem install --ide openclaw` route rejects before writes; this notice makes no claim about the external endpoint.
+</Warning>
+
 ## Overview
 
 The OpenClaw plugin gives claude-mem persistent memory to agents running on the [OpenClaw](https://openclaw.ai) gateway. It handles three things:
@@ -253,9 +257,9 @@ The feed only sends `new_observation` events — not raw tool usage. Observation
 | `Observation feed disabled` in logs | `enabled` is `false` or missing | Set `observationFeed.enabled` to `true` |
 | `Observation feed misconfigured` in logs | Missing `channel` or `to` | Both `channel` and `to` are required |
 
-## Installation
+## External upstream installation reference
 
-Run this one-liner to install everything automatically:
+The following commands refer to an external installer outside this repository. It is not a supported Marian install path and is not verified by this fork:
 
 ```bash
 curl -fsSL https://install.cmem.ai/openclaw.sh | bash

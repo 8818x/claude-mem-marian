@@ -33,7 +33,6 @@ vitest.config*
 .claude/
 .cursor/
 .mcp.json
-.plan/
 
 .DS_Store
 *.log

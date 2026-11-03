@@ -1,21 +1,10 @@
+// Modified by the claude-mem-marian fork: the Antigravity CLI adapter object is retired (Decision 11); the transcript-turn inspection helpers remain as direct-handler compatibility. Upstream attribution is retained.
 import { homedir } from 'os';
-import type { NormalizedHookInput, PlatformAdapter } from '../types.js';
-import { AdapterRejectedInput, isValidCwd } from './errors.js';
-import { extractLastMessage, findLastJsonlEntryBackward } from '../../shared/transcript-parser.js';
+import type { NormalizedHookInput } from '../types.js';
+import { findLastJsonlEntryBackward } from '../../shared/transcript-parser.js';
 import { logger } from '../../utils/logger.js';
 import { expandHomeDirectory, extractFilePaths } from './codex-file-context.js';
 
-// `agy` wraps the real user message in <USER_REQUEST>...</USER_REQUEST> and
-// appends injected <ADDITIONAL_METADATA> (local time) and <USER_SETTINGS_CHANGE>
-// (model switches) blocks. Keep only the genuine request text.
-function unwrapAgyUserInput(text: string): string {
-  const match = text.match(/<USER_REQUEST>\s*([\s\S]*?)\s*<\/USER_REQUEST>/);
-  if (match) return match[1].trim();
-  return text
-    .replace(/<ADDITIONAL_METADATA>[\s\S]*?<\/ADDITIONAL_METADATA>/g, '')
-    .replace(/<USER_SETTINGS_CHANGE>[\s\S]*?<\/USER_SETTINGS_CHANGE>/g, '')
-    .trim();
-}
 
 // Antigravity transcript tool_calls encode string args as JSON-quoted literals
 // (e.g. `"\"/path/to/file\""`), whereas hook stdin passes plain strings.
@@ -34,52 +23,8 @@ function unwrapArgString(value: unknown): string | undefined {
   return trimmed;
 }
 
-function normalizeAgyToolInput(toolName: string | undefined, toolInput: unknown, cwd: string): unknown {
-  if (!toolName || !toolInput || typeof toolInput !== 'object' || Array.isArray(toolInput)) {
-    return toolInput;
-  }
-  const input = toolInput as Record<string, unknown>;
-  if (toolName === 'read_file' || toolName === 'view_file' || toolName === 'edit_file' || toolName === 'write_file') {
-    const filePath = unwrapArgString(input.file_path ?? input.Path ?? input.path);
-    if (filePath && input.file_path !== filePath) {
-      return { ...input, file_path: filePath };
-    }
-    return input;
-  }
-  if (toolName === 'run_command') {
-    const command = unwrapArgString(input.command ?? input.CommandLine);
-    if (!command) return input;
-    const filePaths = extractFilePaths('Bash', { command }, cwd);
-    return {
-      ...input,
-      command,
-      ...(filePaths.length > 0 ? { filePaths } : {}),
-    };
-  }
-  return input;
-}
 
-// agy reports every MCP call as one built-in tool, `call_mcp_tool`, with args
-// { ServerName, ToolName, Arguments } (captured from agy 1.4.9, #5093). Name it
-// the way Claude Code and Codex name MCP tools, mcp__<server>__<tool>, with the
-// tool's own arguments, so the work-state, memory-retrieval and save_memory
-// handling all see the tool that really ran. Any other shape is kept as sent.
-function unwrapAgyMcpCall(toolName: string | undefined, toolInput: unknown): { toolName: string; toolInput: unknown } | null {
-  if (toolName !== 'call_mcp_tool' || !toolInput || typeof toolInput !== 'object' || Array.isArray(toolInput)) return null;
-  const { ServerName: server, ToolName: tool, Arguments: args } = toolInput as Record<string, unknown>;
-  if (typeof server !== 'string' || !server.trim() || typeof tool !== 'string' || !tool.trim()) return null;
-  return { toolName: `mcp__${server.trim()}__${tool.trim()}`, toolInput: args ?? {} };
-}
 
-// agy sends no tool-call id. Its stepIdx is shared by a step's PreToolUse and
-// PostToolUse and keeps counting across the turns of a conversation, so
-// conversation + step names one tool call: a replayed hook updates the same
-// tool_uses row instead of being skipped for lack of an id.
-function agyToolUseId(conversationId: unknown, stepIdx: unknown): string | undefined {
-  if (typeof conversationId !== 'string' || !conversationId) return undefined;
-  if (typeof stepIdx !== 'number' || !Number.isInteger(stepIdx) || stepIdx < 0) return undefined;
-  return `${conversationId}-step-${stepIdx}`;
-}
 
 // Files named by the tool calls of an agy transcript PLANNER_RESPONSE that
 // read them (read_file / view_file, and read commands in run_command).
@@ -176,109 +121,3 @@ export function resolveAntigravityPreInvocation(
 //   - Pre/PostInvocation : { ..., invocationNum, initialNumSteps } (no toolCall)
 //   - Stop           : { ..., terminationReason }
 // PreToolUse is never registered (#5078), so a toolCall payload is a PostToolUse.
-
-export const antigravityCliAdapter: PlatformAdapter = {
-  normalizeInput(raw) {
-    const r = (raw ?? {}) as any;
-
-    const cwd = r.workspacePaths?.[0]
-      ?? r.cwd
-      ?? process.env.GEMINI_CWD
-      ?? process.env.GEMINI_PROJECT_DIR
-      ?? process.env.CLAUDE_PROJECT_DIR
-      ?? process.cwd();
-    if (!isValidCwd(cwd)) {
-      throw new AdapterRejectedInput('invalid_cwd');
-    }
-
-    const sessionId = r.conversationId
-      ?? r.session_id
-      ?? process.env.GEMINI_SESSION_ID
-      ?? undefined;
-
-    const transcriptPath = r.transcriptPath ?? r.transcript_path;
-
-    const hasToolCall = Boolean(r.toolCall);
-    // Pre/PostInvocation payloads are identical; both carry invocationNum and no
-    // toolCall.
-    const isInvocationEvent = 'invocationNum' in r && !hasToolCall;
-
-    let toolName: string | undefined = r.toolCall?.name ?? r.tool_name;
-    let toolInput: unknown = r.toolCall?.args ?? r.tool_input;
-    const mcpCall = unwrapAgyMcpCall(toolName, toolInput);
-    if (mcpCall) ({ toolName, toolInput } = mcpCall);
-    toolInput = normalizeAgyToolInput(toolName, toolInput, cwd);
-    let toolResponse: unknown = r.tool_response;
-    const toolUseId = hasToolCall ? agyToolUseId(r.conversationId, r.stepIdx) : undefined;
-
-    // Antigravity puts the user's prompt in the transcript's USER_INPUT node
-    // (and may also include `lastUserInput` on stdin). Pull it (unwrapped) for
-    // session-init and invocation observations.
-    const transcriptPrompt = transcriptPath
-      ? unwrapAgyUserInput(extractLastMessage(transcriptPath, 'user'))
-      : '';
-    const lastUserInputPrompt = typeof r.lastUserInput === 'string' && r.lastUserInput.trim()
-      ? unwrapAgyUserInput(r.lastUserInput)
-      : '';
-    const prompt: string | undefined = r.prompt ?? (transcriptPrompt || lastUserInputPrompt || undefined);
-
-    if (isInvocationEvent) {
-      // PreInvocation routes to session-init, which works out whether this
-      // model call starts a user turn (resolveAntigravityPreInvocation, run
-      // only there); PostInvocation routes to observation and records the
-      // assistant's turn, which lives in the transcript's PLANNER_RESPONSE node.
-      const response = transcriptPath
-        ? extractLastMessage(transcriptPath, 'assistant')
-        : '';
-      toolName = 'AntigravityProvider';
-      toolInput = { prompt: prompt ?? 'User Query' };
-      toolResponse = { response: response || 'Completed' };
-    }
-
-    if (hasToolCall && toolName && !toolResponse) {
-      // PostToolUse, the only tool event claude-mem registers (#5078). agy
-      // sends `error` only when the tool failed.
-      toolResponse = typeof r.error === 'string' && r.error
-        ? { error: r.error }
-        : { status: 'completed' };
-    }
-
-    return {
-      sessionId,
-      cwd,
-      prompt,
-      toolName,
-      toolInput,
-      toolResponse,
-      toolUseId,
-      transcriptPath,
-    };
-  },
-
-  // Antigravity deserializes hook stdout with strict protojson: unknown fields
-  // (continue / suppressOutput / systemMessage / hookSpecificOutput) make it
-  // discard the whole payload (issue #4057). Emit ONLY fields agy understands:
-  //   - SessionStart   → { "injectSteps": [ ... ] } (startup context injection, issue #4911)
-  //   - PreInvocation  → { "injectSteps": [ ... ] } (file-context for files the
-  //                       previous tool step read, or semantic context on a new
-  //                       turn when CLAUDE_MEM_SEMANTIC_INJECT is on; else {})
-  //   - PostToolUse / PostInvocation / Stop → {}
-  formatOutput(result) {
-    const r = result ?? {};
-
-    if (r.continue === false || r.decision === 'block') {
-      return { decision: 'deny', reason: r.reason ?? 'Denied by hook' };
-    }
-
-    // Context injection (SessionStart / PreInvocation) surfaces as additionalContext /
-    // systemMessage on the result. Antigravity injects it via injectSteps.
-    const additionalContext = r.hookSpecificOutput?.additionalContext ?? r.systemMessage;
-    if (additionalContext) {
-      const ansiRegex = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
-      const cleanMessage = (additionalContext as string).replace(ansiRegex, '');
-      return { injectSteps: [{ ephemeralMessage: cleanMessage }] };
-    }
-
-    return {};
-  }
-};

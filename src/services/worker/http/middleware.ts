@@ -1,4 +1,5 @@
 
+// Modified by the claude-mem-marian fork: worker bind classification and the Decision 17 non-loopback startup refusal live here. Upstream attribution is retained.
 import express, { Request, Response, NextFunction, RequestHandler } from 'express';
 import path from 'path';
 import { isIP } from 'net';
@@ -220,6 +221,50 @@ export function requireLocalhost(req: Request, res: Response, next: NextFunction
   }
 
   next();
+}
+
+// ---------------------------------------------------------------------------
+// Decision 17 worker bind classification.
+//
+// The tokenless worker's only boundary is the bind, so the effective
+// CLAUDE_MEM_WORKER_HOST is classified before listen(). Conservative by
+// construction: only the four established loopback forms the rest of this
+// codebase already treats as local (the same set requireLocalhost/isLocalhost
+// use — `localhost` is normalized to 127.0.0.1 by SettingsDefaultsManager
+// before it reaches here, but classify it anyway) keep the tokenless
+// exemption. Everything else — wildcard (`0.0.0.0`, `::`, empty/unset), a LAN
+// IP, a DNS name, an unresolvable or otherwise ambiguous name — is remote and
+// needs a non-whitespace CLAUDE_MEM_TV_TOKEN to start at all. Locality is
+// never inferred from request headers.
+// ---------------------------------------------------------------------------
+
+const LOOPBACK_BIND_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+/**
+ * Whether an effective bind target is an established loopback address. Takes
+ * the configured bind target only — no Origin, Host, or forwarded header is
+ * consulted, so locality cannot be forged per request (Decision 17).
+ */
+export function isLoopbackBindHost(host: string): boolean {
+  return LOOPBACK_BIND_HOSTS.has(host.trim().toLowerCase().replace(/^\[(.*)\]$/, '$1'));
+}
+
+/**
+ * Decision 17: a non-loopback bind without a non-whitespace TV token refuses
+ * startup before listen(). Returns the refusal diagnostic, or null when
+ * startup may proceed. The diagnostic names the two settings to fix and never
+ * contains the token. Guard against a tokenless full-API listener with an
+ * acknowledgement bypass was considered and rejected by Decision 17.
+ */
+export function workerBindRefusal(host: string, tvToken: string | null | undefined): string | null {
+  if (isLoopbackBindHost(host)) return null;
+  if ((tvToken ?? '').trim().length > 0) return null;
+  return 'Refusing to bind a non-loopback host with no CLAUDE_MEM_TV_TOKEN: the worker API has no request '
+    + 'authentication, so a non-loopback bind would expose the full worker API to the network. '
+    + 'Known credential-bearing settings are masked in GET /api/settings responses, but memory reads and '
+    + 'writes and settings writes are not authenticated. '
+    + 'Set CLAUDE_MEM_WORKER_HOST to 127.0.0.1 (or ::1) for the loopback-only API, or configure '
+    + 'CLAUDE_MEM_TV_TOKEN for its read-only remote surface (/tv, /tv.html, /stream, GET /api/observations).';
 }
 
 // ---------------------------------------------------------------------------

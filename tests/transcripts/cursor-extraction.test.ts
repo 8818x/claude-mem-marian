@@ -3,8 +3,6 @@
  *
  * Validates the three fixes that make Cursor sessions actually get summarized
  * end-to-end (previously they were silently skipped):
- *   A. cursor adapter derives `transcriptPath` from `cwd + conversation_id`,
- *      since Cursor does not pass a transcript path on stdin.
  *   B. `extractLastMessageFromJsonl` accepts both `{type:"assistant"}` (Claude
  *      Code) and `{role:"assistant"}` (Cursor) per-line role markers.
  *   C. `extractLastMessageFromJsonl` keeps scanning back through assistant
@@ -17,7 +15,6 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir, homedir } from 'os';
 import { extractLastMessage, extractLastMessageFromJsonl } from '../../src/shared/transcript-parser.js';
-import { cursorAdapter, deriveCursorTranscriptPath } from '../../src/cli/adapters/cursor.js';
 
 const FIXTURE_PATH = join(__dirname, '..', 'fixtures', 'cursor-session.jsonl');
 
@@ -93,62 +90,6 @@ describe('cursor-extraction: extractLastMessage Cursor JSONL compatibility', () 
     writeFileSync(transcriptPath, lines.map((l) => JSON.stringify(l)).join('\n'));
 
     expect(extractLastMessage(transcriptPath, 'assistant')).toBe('claude code answer');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Bug A: cursor adapter transcript path derivation
-// ---------------------------------------------------------------------------
-
-describe('cursor-extraction: cursorAdapter transcriptPath derivation', () => {
-  const sessionId = `c0ffee${Date.now()}`;
-  const fakeCwd = join(tmpdir(), 'fake.workspace', 'subdir');
-  const slug = fakeCwd.replace(/^\//, '').replace(/[/.]/g, '-');
-  const transcriptDir = join(homedir(), '.cursor', 'projects', slug, 'agent-transcripts', sessionId);
-  const transcriptPath = join(transcriptDir, `${sessionId}.jsonl`);
-
-  beforeEach(() => {
-    mkdirSync(fakeCwd, { recursive: true });
-    mkdirSync(transcriptDir, { recursive: true });
-    writeFileSync(
-      transcriptPath,
-      JSON.stringify({ role: 'assistant', message: { content: [{ type: 'text', text: 'ok' }] } }) + '\n'
-    );
-  });
-
-  afterEach(() => {
-    if (existsSync(transcriptPath)) rmSync(transcriptPath);
-    if (existsSync(transcriptDir)) rmSync(transcriptDir, { recursive: true, force: true });
-    if (existsSync(fakeCwd)) rmSync(fakeCwd, { recursive: true, force: true });
-  });
-
-  it('derives transcriptPath from cwd + conversation_id when the file exists (Bug A regression)', () => {
-    const normalized = cursorAdapter.normalizeInput({
-      cwd: fakeCwd,
-      conversation_id: sessionId,
-    });
-
-    expect(normalized.sessionId).toBe(sessionId);
-    expect(normalized.transcriptPath).toBe(transcriptPath);
-  });
-
-  it('returns transcriptPath: undefined when the file does not exist', () => {
-    rmSync(transcriptPath);
-    const normalized = cursorAdapter.normalizeInput({
-      cwd: fakeCwd,
-      conversation_id: sessionId,
-    });
-
-    expect(normalized.sessionId).toBe(sessionId);
-    expect(normalized.transcriptPath).toBeUndefined();
-  });
-
-  it('returns undefined when sessionId is missing (deriveCursorTranscriptPath direct call)', () => {
-    expect(deriveCursorTranscriptPath(fakeCwd, undefined)).toBeUndefined();
-  });
-
-  it('returns undefined when cwd is missing (deriveCursorTranscriptPath direct call)', () => {
-    expect(deriveCursorTranscriptPath(undefined, sessionId)).toBeUndefined();
   });
 });
 

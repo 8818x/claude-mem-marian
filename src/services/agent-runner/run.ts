@@ -1,4 +1,5 @@
 // Modified by the Marian fork: keep Windows refresh execution restricted and classify backend failures.
+// Modified by the claude-mem-marian fork: Decision 16 per-backend child-environment policy.
 /**
  * Runs one claude-mem job on the first installed, logged-in agent the user
  * already has (detect.ts order: Claude Code → Codex → Gemini). Shared by My
@@ -31,8 +32,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'os';
 import { dirname, isAbsolute, join, relative, resolve } from 'path';
 import { query, type CanUseTool, type Options, type SdkPluginConfig } from '@anthropic-ai/claude-agent-sdk';
-import { buildIsolatedEnvWithFreshOAuth } from '../../shared/EnvManager.js';
-import { sanitizeEnv } from '../../supervisor/env-sanitizer.js';
+import { buildIsolatedEnvWithFreshOAuth, loadClaudeMemEnv } from '../../shared/EnvManager.js';
+import {
+  childEnvAllowlist,
+  copyAllowedEnv,
+  sanitizeEnv,
+  CODEX_CHILD_EXTRA,
+  GEMINI_CHILD_EXTRA,
+} from '../../supervisor/env-sanitizer.js';
 import { logger } from '../../utils/logger.js';
 import { runtimeReadRoots } from './runtime-read-roots.js';
 import { detectUsableAgents, GEMINI_NO_MCP_SERVERS, runCommand, type CommandResult, type UsableAgent, type UsableAgentId } from './detect.js';
@@ -90,14 +97,35 @@ export interface AgentRunnerDependencies {
   query: typeof query;
   /** Environment for the agent process: the worker's isolated credentials, never tracked by claude-mem's own hooks.
    * Built fresh for every step: a run can outlive the OAuth access token it started with (Oct 22: the Mac slept
-   * 11 hours mid-run, and the token injected at the start was revoked by the time the next step asked). */
-  buildEnv: () => Promise<NodeJS.ProcessEnv>;
+   * 11 hours mid-run, and the token injected at the start was revoked by the time the next step asked).
+   * Decision 16: per backend — the Claude runner resolves fresh OAuth and its Anthropic family;
+   * the Codex runner gets runtime+proxy names and resolved CODEX_HOME only; the Gemini runner gets
+   * runtime+proxy names, its selected GEMINI_API_KEY, and its Vertex/ADC selectors. */
+  buildEnv: (agent: UsableAgentId) => Promise<NodeJS.ProcessEnv>;
 }
 
-async function defaultEnv(): Promise<NodeJS.ProcessEnv> {
+async function defaultEnv(agent: UsableAgentId): Promise<NodeJS.ProcessEnv> {
   // CLAUDE_MEM_INTERNAL=1 keeps claude-mem's hooks from recording this run as
   // the owner's own work, so a refresh never makes itself due again.
-  return { ...sanitizeEnv(await buildIsolatedEnvWithFreshOAuth()), CLAUDE_MEM_INTERNAL: '1' };
+  if (agent === 'claude-code') {
+    return { ...sanitizeEnv(await buildIsolatedEnvWithFreshOAuth()), CLAUDE_MEM_INTERNAL: '1' };
+  }
+  // Decision 16: the codex-exec and gemini runners never receive Claude OAuth,
+  // Anthropic credentials, AWS/GCP secrets, or other providers' keys/pools.
+  const env: Record<string, string> = {};
+  copyAllowedEnv(
+    env,
+    process.env,
+    childEnvAllowlist(agent === 'codex' ? CODEX_CHILD_EXTRA : GEMINI_CHILD_EXTRA, true),
+    true,
+  );
+  if (agent === 'gemini') {
+    // A configured Gemini API-key path receives only its selected GEMINI_API_KEY
+    // — never the rotation pool, which stays worker-side.
+    const selectedGeminiKey = loadClaudeMemEnv().GEMINI_API_KEY;
+    if (selectedGeminiKey) env.GEMINI_API_KEY = selectedGeminiKey;
+  }
+  return { ...env, CLAUDE_MEM_INTERNAL: '1' };
 }
 
 const defaultDependencies: AgentRunnerDependencies = {
@@ -148,7 +176,7 @@ function claudeCodeAsk(agent: UsableAgent, task: AgentTask, dependencies: AgentR
     return { behavior: 'deny', message: `${toolName} is not available to this read-only step.` };
   };
   return async (prompt, models, answerSchema) => {
-    const env = await dependencies.buildEnv();
+    const env = await dependencies.buildEnv('claude-code');
     let stderr = '';
     const options: Options = {
       pathToClaudeCodeExecutable: executable,
@@ -261,7 +289,7 @@ export function codexModelForLogin(step: StepModel | undefined, env: NodeJS.Proc
 
 function codexAsk(agent: UsableAgent, task: AgentTask, dependencies: AgentRunnerDependencies): AskAgent {
   return async (prompt, models, answerSchema) => {
-    const env = await dependencies.buildEnv();
+    const env = await dependencies.buildEnv('codex');
     const directory = join(task.cwd, 'agent-runs');
     mkdirSync(directory, { recursive: true });
     const id = randomBytes(6).toString('hex');
@@ -292,7 +320,7 @@ function codexAsk(agent: UsableAgent, task: AgentTask, dependencies: AgentRunner
 
 function geminiAsk(agent: UsableAgent, task: AgentTask, dependencies: AgentRunnerDependencies): AskAgent {
   return async (prompt, models) => {
-    const env = await dependencies.buildEnv();
+    const env = await dependencies.buildEnv('gemini');
     const model = models.gemini?.model;
     const policyDir = mkdtempSync(join(tmpdir(), 'claude-mem-gemini-policy-'));
     const policyPath = join(policyDir, 'settings.json');

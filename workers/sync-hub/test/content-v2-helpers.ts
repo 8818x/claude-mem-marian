@@ -1,4 +1,4 @@
-import fixture from "../../../fixtures/tpuf-content-v2.json";
+import fixture from "../../../tests/fixtures/tpuf-content-v2.json";
 import {
 	canonicalJson,
 	sha256Base64Url,

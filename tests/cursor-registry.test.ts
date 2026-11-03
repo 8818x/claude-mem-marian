@@ -5,11 +5,13 @@ import { tmpdir } from 'os';
 import {
   readCursorRegistry,
   writeCursorRegistry,
-  registerCursorProject,
   unregisterCursorProject
 } from '../src/utils/cursor-utils';
 
-describe('Cursor Project Registry', () => {
+// Decision 08: project registration retired with active hook support. Registry
+// coverage keeps the cleanup-side helpers (read/write/unregister); setups that
+// used the retired registerCursorProject write explicit fixture JSON instead.
+describe('Cursor Project Registry (cleanup-side helpers)', () => {
   let tempDir: string;
   let registryFile: string;
 
@@ -53,30 +55,20 @@ describe('Cursor Project Registry', () => {
     });
   });
 
-  describe('registerCursorProject', () => {
-    it('creates registry file if it does not exist', () => {
-      registerCursorProject(registryFile, 'new-project', '/path/to/project');
+  describe('writeCursorRegistry', () => {
+    it('creates the registry file when missing', () => {
+      writeCursorRegistry(registryFile, {
+        'new-project': { workspacePath: '/path/to/project', installedAt: '2025-01-01T00:00:00.000Z' }
+      });
 
       expect(existsSync(registryFile)).toBe(true);
     });
 
-    it('stores project with workspacePath and installedAt', () => {
-      const before = Date.now();
-      registerCursorProject(registryFile, 'test-project', '/workspace/test');
-      const after = Date.now();
-
-      const registry = readCursorRegistry(registryFile);
-      expect(registry['test-project']).toBeDefined();
-      expect(registry['test-project'].workspacePath).toBe('/workspace/test');
-
-      const installedAt = new Date(registry['test-project'].installedAt).getTime();
-      expect(installedAt).toBeGreaterThanOrEqual(before);
-      expect(installedAt).toBeLessThanOrEqual(after);
-    });
-
-    it('preserves existing projects when registering new one', () => {
-      registerCursorProject(registryFile, 'project-a', '/path/a');
-      registerCursorProject(registryFile, 'project-b', '/path/b');
+    it('stores projects with workspacePath and installedAt', () => {
+      writeCursorRegistry(registryFile, {
+        'project-a': { workspacePath: '/path/a', installedAt: '2025-01-01T00:00:00.000Z' },
+        'project-b': { workspacePath: '/path/b', installedAt: '2025-01-01T00:00:00.000Z' }
+      });
 
       const registry = readCursorRegistry(registryFile);
       expect(Object.keys(registry)).toHaveLength(2);
@@ -84,29 +76,46 @@ describe('Cursor Project Registry', () => {
       expect(registry['project-b'].workspacePath).toBe('/path/b');
     });
 
-    it('overwrites existing project with same name', () => {
-      registerCursorProject(registryFile, 'my-project', '/old/path');
-      registerCursorProject(registryFile, 'my-project', '/new/path');
-
-      const registry = readCursorRegistry(registryFile);
-      expect(Object.keys(registry)).toHaveLength(1);
-      expect(registry['my-project'].workspacePath).toBe('/new/path');
-    });
-
     it('handles special characters in project name', () => {
       const projectName = 'my-project_v2.0 (beta)';
-      registerCursorProject(registryFile, projectName, '/path/to/project');
+      writeCursorRegistry(registryFile, {
+        [projectName]: { workspacePath: '/path/to/project', installedAt: '2025-01-01T00:00:00.000Z' }
+      });
 
       const registry = readCursorRegistry(registryFile);
       expect(registry[projectName]).toBeDefined();
       expect(registry[projectName].workspacePath).toBe('/path/to/project');
     });
+
+    it('stores registry as pretty-printed JSON', () => {
+      writeCursorRegistry(registryFile, {
+        test: { workspacePath: '/path', installedAt: '2025-01-01T00:00:00.000Z' }
+      });
+
+      const content = readFileSync(registryFile, 'utf-8');
+      expect(content).toContain('\n');
+      expect(content).toContain('  ');
+    });
+
+    it('registry file is valid JSON that can be read by other tools', () => {
+      writeCursorRegistry(registryFile, {
+        'project-1': { workspacePath: '/path/1', installedAt: '2025-01-01T00:00:00.000Z' },
+        'project-2': { workspacePath: '/path/2', installedAt: '2025-01-01T00:00:00.000Z' }
+      });
+
+      const parsed = JSON.parse(readFileSync(registryFile, 'utf-8'));
+
+      expect(parsed).toHaveProperty('project-1');
+      expect(parsed).toHaveProperty('project-2');
+    });
   });
 
   describe('unregisterCursorProject', () => {
-    it('removes specified project from registry', () => {
-      registerCursorProject(registryFile, 'project-a', '/path/a');
-      registerCursorProject(registryFile, 'project-b', '/path/b');
+    it('removes only the specified project and keeps unrelated workspaces', () => {
+      writeCursorRegistry(registryFile, {
+        'project-a': { workspacePath: '/path/a', installedAt: '2025-01-01T00:00:00.000Z' },
+        'project-b': { workspacePath: '/path/b', installedAt: '2025-01-01T00:00:00.000Z' }
+      });
 
       unregisterCursorProject(registryFile, 'project-a');
 
@@ -116,7 +125,9 @@ describe('Cursor Project Registry', () => {
     });
 
     it('does nothing when unregistering non-existent project', () => {
-      registerCursorProject(registryFile, 'existing', '/path');
+      writeCursorRegistry(registryFile, {
+        existing: { workspacePath: '/path', installedAt: '2025-01-01T00:00:00.000Z' }
+      });
 
       unregisterCursorProject(registryFile, 'non-existent');
 
@@ -128,27 +139,6 @@ describe('Cursor Project Registry', () => {
       unregisterCursorProject(registryFile, 'any-project');
 
       expect(existsSync(registryFile)).toBe(false);
-    });
-  });
-
-  describe('registry format validation', () => {
-    it('stores registry as pretty-printed JSON', () => {
-      registerCursorProject(registryFile, 'test', '/path');
-
-      const content = readFileSync(registryFile, 'utf-8');
-      expect(content).toContain('\n');
-      expect(content).toContain('  ');
-    });
-
-    it('registry file is valid JSON that can be read by other tools', () => {
-      registerCursorProject(registryFile, 'project-1', '/path/1');
-      registerCursorProject(registryFile, 'project-2', '/path/2');
-
-      const content = readFileSync(registryFile, 'utf-8');
-      const parsed = JSON.parse(content);
-
-      expect(parsed).toHaveProperty('project-1');
-      expect(parsed).toHaveProperty('project-2');
     });
   });
 });

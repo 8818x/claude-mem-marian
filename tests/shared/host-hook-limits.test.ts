@@ -1,3 +1,4 @@
+// Modified by the claude-mem-marian fork: retired host routes and cleanup contracts. Upstream attribution is retained.
 import { afterEach, describe, expect, it } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -7,7 +8,6 @@ import {
   SESSION_START_HOOK_LIMIT_MS,
   serverSessionStartBudgetMs,
 } from '../../src/shared/host-hook-limits.js';
-import { buildAntigravityHooksConfig } from '../../src/services/integrations/AntigravityCliHooksInstaller.js';
 
 const REPO_ROOT = join(import.meta.dir, '..', '..');
 const originalPlatform = process.platform;
@@ -44,15 +44,9 @@ describe('SESSION_START_HOOK_LIMIT_MS', () => {
       .toBe(SESSION_START_HOOK_LIMIT_MS.codex / 1000);
   });
 
-  it('uses the per-hook timeout the Antigravity installer writes for both of its host ids', () => {
+  it('keeps the shared Antigravity host-id limits for both of its ids', () => {
     expect(SESSION_START_HOOK_LIMIT_MS['antigravity-cli']).toBe(ANTIGRAVITY_HOOK_TIMEOUT_MS);
     expect(SESSION_START_HOOK_LIMIT_MS.antigravity).toBe(ANTIGRAVITY_HOOK_TIMEOUT_MS);
-
-    // agy reads `timeout` in seconds (#4196); the SessionStart hook runs `context` (#4911).
-    const agyHooks = buildAntigravityHooksConfig('/usr/local/bin/bun', '/opt/plugin/scripts/worker-service.cjs') as Record<string, any>;
-    const contextHook = agyHooks['claude-mem'].SessionStart[0];
-    expect(contextHook.command).toEndWith('hook antigravity-cli context');
-    expect(contextHook.timeout).toBe(ANTIGRAVITY_HOOK_TIMEOUT_MS / 1000);
   });
 });
 

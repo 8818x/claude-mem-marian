@@ -68,7 +68,15 @@ async function buildViewer() {
     // to plugin/ui/work-view with fonts bundled locally, so an offline install renders immediately.
     // execFileSync throws on a non-zero exit, which fails the build. Windows needs a shell to run npm.cmd.
     const myWorkAppDir = path.join(srcUiDir, 'my-work');
-    const npmRunOptions = { cwd: myWorkAppDir, stdio: 'inherit', shell: process.platform === 'win32' };
+    const npmRunOptions = {
+      cwd: myWorkAppDir,
+      stdio: 'inherit',
+      shell: process.platform === 'win32',
+      env: {
+        ...process.env,
+        npm_config_cache: path.join(rootDir, '.scratch', 'build-cache', 'npm')
+      }
+    };
     execFileSync('npm', ['ci', '--no-audit', '--no-fund'], npmRunOptions);
     execFileSync('npm', ['run', 'build'], npmRunOptions);
     const iconFiles = fs.readdirSync(srcUiDir).filter(file => file.startsWith('icon-thick-') && file.endsWith('.svg'));

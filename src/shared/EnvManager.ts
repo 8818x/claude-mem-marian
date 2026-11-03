@@ -1,4 +1,5 @@
 
+// Modified by the claude-mem-marian fork: Decision 16 child-environment allowlists.
 import { createHash } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from 'fs';
 import { parseEnv } from 'util';
@@ -17,6 +18,7 @@ import {
   type ClaudeCredentialProfile,
   type OAuthTokenResult,
 } from './oauth-token.js';
+import { childEnvAllowlist, copyAllowedEnv, CLAUDE_CHILD_EXTRA, CLAUDE_CLOUD_EXTRA } from '../supervisor/env-sanitizer.js';
 
 /** #2753 — the credential profile's label for logging (never the token itself): 'default' for the bare keychain entry, else the config dir's basename. */
 function resolveConfigDirProfileLabel(): string {
@@ -228,12 +230,23 @@ export function saveClaudeMemEnv(env: ClaudeMemEnv): void {
 }
 
 export function buildIsolatedEnv(includeCredentials: boolean = true): Record<string, string> {
+  // Decision 16: the child environment is an explicit allowlist — runtime
+  // discovery, trust certificates, home/config roots, proxies, and Claude's
+  // named controls and cloud fields. Parent-minus-blocklist forwarding is
+  // gone, so arbitrary parent secrets (GitHub tokens, database URLs,
+  // unrelated provider keys) never reach a child.
   const isolatedEnv: Record<string, string> = {};
-  for (const [key, value] of Object.entries(process.env)) {
-    if (value !== undefined && !BLOCKED_ENV_VARS.includes(key)) {
-      isolatedEnv[key] = value;
-    }
-  }
+  copyAllowedEnv(
+    isolatedEnv,
+    process.env,
+    // includeCredentials=false suppresses every credential exception —
+    // cloud (Bedrock/Vertex) names included — per Decision 16.
+    childEnvAllowlist(includeCredentials ? [...CLAUDE_CHILD_EXTRA, ...CLAUDE_CLOUD_EXTRA] : CLAUDE_CHILD_EXTRA, true),
+    false,
+  );
+  // The canonical leak deny-list still guards this constructor even though the
+  // allowlist already excludes every name on it.
+  for (const blocked of BLOCKED_ENV_VARS) delete isolatedEnv[blocked];
 
   isolatedEnv.CLAUDE_CODE_ENTRYPOINT = 'sdk-ts';
 
@@ -301,10 +314,15 @@ export function buildIsolatedEnv(includeCredentials: boolean = true): Record<str
   if (includeCredentials) {
     const credentials = loadClaudeMemEnv();
 
-    for (const key of CREDENTIAL_KEYS) {
+    // Decision 16: the Claude child needs only its Anthropic authentication
+    // family, injected through the existing resolver. Gemini/OpenRouter/
+    // OpenAI-compatible keys and the rotation pools stay worker-side (rotation
+    // remains in the provider pool owner). ANTHROPIC_FALLBACK_API_KEY is
+    // injected as ANTHROPIC_API_KEY only on a quota-fallback run
+    // (buildIsolatedEnvWithFreshOAuth).
+    for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL'] as const) {
       const value = credentials[key];
-      // Injected as ANTHROPIC_API_KEY only on a quota-fallback run (buildIsolatedEnvWithFreshOAuth).
-      if (value && key !== 'ANTHROPIC_FALLBACK_API_KEY') isolatedEnv[key] = value;
+      if (value) isolatedEnv[key] = value;
     }
 
     // Note: CLAUDE_CODE_OAUTH_TOKEN is intentionally NOT copied from

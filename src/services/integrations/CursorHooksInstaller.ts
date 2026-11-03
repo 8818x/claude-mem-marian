@@ -1,68 +1,21 @@
 
+// Modified by the claude-mem-marian fork: Cursor active hook support is retired (Decision 08); worker `cursor status`/`cursor uninstall` migration diagnostics and cleanup remain. Upstream attribution is retained.
 import path from 'path';
 import { homedir } from 'os';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { logger } from '../../utils/logger.js';
 import { parseJsonWithBom } from '../../shared/atomic-json.js';
 import { getProjectContext } from '../../utils/project-name.js';
-import { workerHttpRequest } from '../../shared/worker-utils.js';
+import { requireMaintainedInstallTarget, UnsupportedInstallTargetError } from '../../shared/integration-id.js';
 import { DATA_DIR } from '../../shared/paths.js';
-import {
-  readCursorRegistry as readCursorRegistryFromFile,
-  registerCursorProject as registerCursorProjectInFile,
-  unregisterCursorProject as unregisterCursorProjectInFile,
-  configureCursorMcp as configureCursorMcpFile,
-  writeContextFile,
-  type CursorProjectRegistry
-} from '../../utils/cursor-utils.js';
-import type { CursorInstallTarget, CursorHooksJson } from './types.js';
-import {
-  getMcpServerAbsolutePath,
-  getWorkerServiceAbsolutePath,
-  getBunAbsolutePath,
-} from './install-paths.js';
+import { unregisterCursorProject as unregisterCursorProjectInFile } from '../../utils/cursor-utils.js';
+import type { CursorInstallTarget } from './types.js';
 
 const CURSOR_REGISTRY_FILE = path.join(DATA_DIR, 'cursor-projects.json');
-
-export function readCursorRegistry(): CursorProjectRegistry {
-  return readCursorRegistryFromFile(CURSOR_REGISTRY_FILE);
-}
-
-export function registerCursorProject(projectName: string, workspacePath: string): void {
-  registerCursorProjectInFile(CURSOR_REGISTRY_FILE, projectName, workspacePath);
-  logger.info('CURSOR', 'Registered project for auto-context updates', { projectName, workspacePath });
-}
 
 export function unregisterCursorProject(projectName: string): void {
   unregisterCursorProjectInFile(CURSOR_REGISTRY_FILE, projectName);
   logger.info('CURSOR', 'Unregistered project', { projectName });
-}
-
-export async function updateCursorContextForProject(projectName: string): Promise<void> {
-  const registry = readCursorRegistry();
-  const entry = registry[projectName];
-
-  if (!entry) return; 
-
-  try {
-    const response = await workerHttpRequest(
-      `/api/context/inject?project=${encodeURIComponent(projectName)}`
-    );
-
-    if (!response.ok) return;
-
-    const context = await response.text();
-    if (!context || !context.trim()) return;
-
-    writeContextFile(entry.workspacePath, context);
-    logger.debug('CURSOR', 'Updated context file', { projectName, workspacePath: entry.workspacePath });
-  } catch (error) {
-    if (error instanceof Error) {
-      logger.error('WORKER', 'Failed to update context file', { projectName }, error);
-    } else {
-      logger.error('WORKER', 'Failed to update context file', { projectName }, new Error(String(error)));
-    }
-  }
 }
 
 export function getTargetDir(target: CursorInstallTarget): string | null {
@@ -82,103 +35,6 @@ export function getTargetDir(target: CursorInstallTarget): string | null {
       return null;
     default:
       return null;
-  }
-}
-
-export function configureCursorMcp(target: CursorInstallTarget): number {
-  const mcpServerPath = getMcpServerAbsolutePath();
-
-  if (!mcpServerPath) {
-    console.error('Could not find MCP server script');
-    console.error('   Expected at: ~/.claude/plugins/marketplaces/thedotmack/plugin/scripts/mcp-server.cjs');
-    return 1;
-  }
-
-  const targetDir = getTargetDir(target);
-  if (!targetDir) {
-    console.error(`Invalid target: ${target}. Use: project or user`);
-    return 1;
-  }
-
-  const mcpJsonPath = path.join(targetDir, 'mcp.json');
-
-  try {
-    configureCursorMcpFile(mcpJsonPath, mcpServerPath);
-    console.log(`  Configured MCP server in ${target === 'user' ? '~/.cursor' : '.cursor'}/mcp.json`);
-    console.log(`    Server path: ${mcpServerPath}`);
-
-    return 0;
-  } catch (error) {
-    console.error(`Failed to configure MCP: ${(error as Error).message}`);
-    return 1;
-  }
-}
-
-export async function installCursorHooks(target: CursorInstallTarget): Promise<number> {
-  console.log(`\nInstalling Claude-Mem Cursor hooks (${target} level)...\n`);
-
-  const targetDir = getTargetDir(target);
-  if (!targetDir) {
-    console.error(`Invalid target: ${target}. Use: project, user, or enterprise`);
-    return 1;
-  }
-
-  const workerServicePath = getWorkerServiceAbsolutePath();
-  if (!workerServicePath) {
-    console.error('Could not find worker-service.cjs');
-    console.error('   Expected at: ~/.claude/plugins/marketplaces/thedotmack/plugin/scripts/worker-service.cjs');
-    return 1;
-  }
-
-  const workspaceRoot = process.cwd();
-
-  const hooksJsonPath = path.join(targetDir, 'hooks.json');
-
-  const bunPath = getBunAbsolutePath();
-  const escapedBunPath = bunPath.replace(/\\/g, '\\\\');
-
-  const escapedWorkerPath = workerServicePath.replace(/\\/g, '\\\\');
-
-  const callOperator = process.platform === 'win32' ? '& ' : '';
-  const makeHookCommand = (command: string) => {
-    return `${callOperator}"${escapedBunPath}" "${escapedWorkerPath}" hook cursor ${command}`;
-  };
-
-  console.log(`  Using Bun runtime: ${bunPath}`);
-
-  const hooksJson: CursorHooksJson = {
-    version: 1,
-    hooks: {
-      beforeSubmitPrompt: [
-        { command: makeHookCommand('session-init') },
-        { command: makeHookCommand('context') }
-      ],
-      afterMCPExecution: [
-        { command: makeHookCommand('observation') }
-      ],
-      afterShellExecution: [
-        { command: makeHookCommand('observation') }
-      ],
-      afterFileEdit: [
-        { command: makeHookCommand('file-edit') }
-      ],
-      stop: [
-        { command: makeHookCommand('summarize') }
-      ]
-    }
-  };
-
-  try {
-    mkdirSync(targetDir, { recursive: true });
-    await writeHooksJsonAndSetupProject(hooksJsonPath, hooksJson, workerServicePath, target, targetDir, workspaceRoot);
-    return 0;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`\nInstallation failed: ${message}`);
-    if (target === 'enterprise') {
-      console.error('   Tip: Enterprise installation may require sudo/admin privileges');
-    }
-    return 1;
   }
 }
 
@@ -260,25 +116,6 @@ function readExistingCursorHooksJson(hooksJsonPath: string): Record<string, any>
   }
 }
 
-/** Merge our hooks into whatever the user already has, replacing only our own earlier entries. */
-function mergeCursorHooksJson(existing: Record<string, any> | null, ours: CursorHooksJson): Record<string, any> {
-  const merged: Record<string, any> = { ...(existing ?? {}) };
-  if (typeof merged.version !== 'number') merged.version = ours.version;
-  const existingHooks: Record<string, any> =
-    merged.hooks && typeof merged.hooks === 'object' && !Array.isArray(merged.hooks) ? merged.hooks : {};
-  const mergedHooks: Record<string, any> = { ...existingHooks };
-
-  for (const [eventName, entries] of Object.entries(ours.hooks)) {
-    const kept = Array.isArray(existingHooks[eventName])
-      ? existingHooks[eventName].filter((hook: unknown) => !isClaudeMemCursorHook(hook))
-      : [];
-    mergedHooks[eventName] = [...kept, ...(entries ?? [])];
-  }
-
-  merged.hooks = mergedHooks;
-  return merged;
-}
-
 /** Drop only our entries. Returns the file's remaining content, or null when no hooks remain. */
 function removeClaudeMemCursorHooks(existing: Record<string, any>): Record<string, any> | null {
   const hooks: Record<string, any> =
@@ -296,101 +133,6 @@ function removeClaudeMemCursorHooks(existing: Record<string, any>): Record<strin
 
   if (Object.keys(hooks).length === 0) return null;
   return { ...existing, hooks };
-}
-
-async function writeHooksJsonAndSetupProject(
-  hooksJsonPath: string,
-  hooksJson: CursorHooksJson,
-  workerServicePath: string,
-  target: CursorInstallTarget,
-  targetDir: string,
-  workspaceRoot: string,
-): Promise<void> {
-  const merged = mergeCursorHooksJson(readExistingCursorHooksJson(hooksJsonPath), hooksJson);
-  writeFileSync(hooksJsonPath, JSON.stringify(merged, null, 2));
-  console.log(`  Wrote hooks.json (unified CLI mode, existing hooks preserved)`);
-  console.log(`  Worker service: ${workerServicePath}`);
-
-  if (target === 'project') {
-    await setupProjectContext(targetDir, workspaceRoot);
-  }
-
-  console.log(`
-Installation complete!
-
-Hooks installed to: ${targetDir}/hooks.json
-Using unified CLI: bun worker-service.cjs hook cursor <command>
-
-Next steps:
-  1. Start claude-mem worker: claude-mem start
-  2. Restart Cursor to load the hooks
-  3. Check Cursor Settings → Hooks tab to verify
-
-Context Injection:
-  Context from past sessions is stored in .cursor/rules/claude-mem-context.mdc
-  and automatically included in every chat. It updates after each session ends.
-`);
-}
-
-async function setupProjectContext(targetDir: string, workspaceRoot: string): Promise<void> {
-  const rulesDir = path.join(targetDir, 'rules');
-  mkdirSync(rulesDir, { recursive: true });
-
-  const projectName = getProjectContext(workspaceRoot).primary;
-  let contextGenerated = false;
-
-  console.log(`  Generating initial context...`);
-
-  try {
-    contextGenerated = await fetchInitialContextFromWorker(projectName, workspaceRoot);
-  } catch (error) {
-    if (error instanceof Error) {
-      logger.debug('WORKER', 'Worker not running during install', {}, error);
-    } else {
-      logger.debug('WORKER', 'Worker not running during install', {}, new Error(String(error)));
-    }
-  }
-
-  if (!contextGenerated) {
-    const rulesFile = path.join(rulesDir, 'claude-mem-context.mdc');
-    const placeholderContent = `---
-alwaysApply: true
-description: "Claude-mem context from past sessions (auto-updated)"
----
-
-# Memory Context from Past Sessions
-
-*No context yet. Complete your first session and context will appear here.*
-
-Use claude-mem's MCP search tools for manual memory queries.
-`;
-    writeFileSync(rulesFile, placeholderContent);
-    console.log(`  Created placeholder context file (will populate after first session)`);
-  }
-
-  registerCursorProject(projectName, workspaceRoot);
-  console.log(`  Registered for auto-context updates`);
-}
-
-async function fetchInitialContextFromWorker(
-  projectName: string,
-  workspaceRoot: string,
-): Promise<boolean> {
-  const healthResponse = await workerHttpRequest('/api/readiness');
-  if (!healthResponse.ok) return false;
-
-  const contextResponse = await workerHttpRequest(
-    `/api/context/inject?project=${encodeURIComponent(projectName)}`,
-  );
-  if (!contextResponse.ok) return false;
-
-  const context = await contextResponse.text();
-  if (context && context.trim()) {
-    writeContextFile(workspaceRoot, context);
-    console.log(`  Generated initial context from existing memory`);
-    return true;
-  }
-  return false;
 }
 
 export function uninstallCursorHooks(target: CursorInstallTarget): number {
@@ -533,7 +275,7 @@ export function checkCursorHooksStatus(): number {
     if (legacyCommands.length > 0) {
       const hasBash = legacyCommands.some((command) => /\.sh["']?$/.test(command));
       const hasPs = legacyCommands.some((command) => /\.ps1["']?$/.test(command));
-      console.log(`   Mode: Legacy shell scripts (consider reinstalling for unified CLI)`);
+      console.log(`   Mode: Legacy shell scripts (retired installer residue; 'cursor uninstall' removes these)`);
       if (hasBash && hasPs) {
         console.log(`   Platform: Both (bash + PowerShell)`);
       } else if (hasBash) {
@@ -549,28 +291,32 @@ export function checkCursorHooksStatus(): number {
     if (loc.name === 'Project') {
       const contextFile = path.join(loc.dir, 'rules', 'claude-mem-context.mdc');
       if (existsSync(contextFile)) {
-        console.log(`   Context: Active`);
+        console.log(`   Context: legacy claude-mem context file present (automatic updates are retired; 'cursor uninstall' removes it)`);
       } else {
-        console.log(`   Context: Not yet generated (will be created on first prompt)`);
+        console.log(`   Context: none`);
       }
     }
     console.log('');
   }
 
   if (!anyInstalled) {
-    console.log('No hooks installed. Run: claude-mem cursor install\n');
+    console.log('No hooks installed. New Cursor installations are not supported by this fork.\n');
   }
 
   return 0;
 }
 
 export async function handleCursorCommand(subcommand: string, args: string[]): Promise<number> {
-  switch (subcommand) {
-    case 'install': {
-      const target = (args[0] || 'project') as CursorInstallTarget;
-      return installCursorHooks(target);
+  if (subcommand === 'install' || subcommand === 'setup') {
+    try {
+      requireMaintainedInstallTarget('cursor');
+    } catch (error: unknown) {
+      if (!(error instanceof UnsupportedInstallTargetError)) throw error;
+      console.error(error.message);
+      return 1;
     }
-
+  }
+  switch (subcommand) {
     case 'uninstall': {
       const target = (args[0] || 'project') as CursorInstallTarget;
       return uninstallCursorHooks(target);
@@ -580,32 +326,19 @@ export async function handleCursorCommand(subcommand: string, args: string[]): P
       return checkCursorHooksStatus();
     }
 
-    case 'setup': {
-      console.log('Use the main entry point for setup');
-      return 0;
-    }
-
     default: {
       console.log(`
 Claude-Mem Cursor Integration
 
-Usage: claude-mem cursor <command> [options]
+Usage: claude-mem cursor <status|uninstall> [options]
 
 Commands:
-  setup               Interactive guided setup (recommended for first-time users)
-
-  install [target]    Install Cursor hooks
-                      target: project (default), user, or enterprise
-
   uninstall [target]  Remove Cursor hooks
                       target: project (default), user, or enterprise
 
   status              Check installation status
 
 Examples:
-  npm run cursor:setup                   # Interactive wizard (recommended)
-  npm run cursor:install                 # Install for current project
-  claude-mem cursor install user         # Install globally for user
   claude-mem cursor uninstall            # Remove from current project
   claude-mem cursor status               # Check if hooks are installed
 

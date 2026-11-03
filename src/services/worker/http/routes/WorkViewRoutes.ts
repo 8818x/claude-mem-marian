@@ -259,7 +259,13 @@ interface WorkViewOptions {
 export interface SetupWorkItem { groupId: string; title: string; platform: string | null; lastActiveAt: string | null; progressPercent: number | null }
 const SETUP_WORK_SHOWN = 5;
 
-const setupScanBody = z.object({ improveProduct: z.boolean().optional() }).strict();
+// Decision 15: explicit informed hosted-upload authorization. Only the literal { authorized: true } shape
+// authorizes an attempt; absent, false, or malformed values are denied (malformed never reaches the scan).
+const setupScanBody = z.object({
+  improveProduct: z.boolean().optional(),
+  hostedUpload: z.object({ authorized: z.literal(true) }).optional(),
+}).strict();
+const setupHostedAuthorizationBody = z.object({ authorized: z.literal(true) }).strict();
 const setupScanPreferencesBody = z.object({ improveProduct: z.boolean() }).strict();
 // On The Go is always CMEM Pro: standalone Cloud Sync on your own tokens has no price yet (gap G1).
 const setupChoiceBody = z.object({
@@ -450,7 +456,7 @@ export class WorkViewRoutes extends BaseRouteHandler {
         localDeviceId: () => this.getLocalDeviceId(),
       }) : null)
       : options.hostedIntent;
-    if (this.hostedIntent) this.setupScan?.setExtractor((prompts, improveProduct) => this.hostedIntent!.run(prompts, improveProduct));
+    if (this.hostedIntent) this.setupScan?.setExtractor((prompts, improveProduct, authorization) => this.hostedIntent!.run(prompts, improveProduct, authorization));
     this.unsubscribeHistoryImport = this.historyImport?.subscribe(state => this.broadcast('setup-import', state)) ?? null;
     // Hosted extraction is awaited inside the scan, so failures stay in the scan screen's error slot.
     this.unsubscribeSetupScan = this.setupScan?.subscribe(state => {
@@ -577,7 +583,15 @@ export class WorkViewRoutes extends BaseRouteHandler {
     app.post('/api/setup/scan', workViewLoopbackOnly, requireWorkViewOrigin, validateBody(setupScanBody), this.wrapHandler((req, res) => {
       if (!this.setupScan) { res.status(503).json({ error: 'The prompt scan is unavailable on this worker.' }); return; }
       res.setHeader('Cache-Control', 'no-store');
-      res.status(202).json(this.setupScan.start(req.body.improveProduct));
+      res.status(202).json(this.setupScan.start(req.body.improveProduct, req.body.hostedUpload));
+    }));
+    // Decision 15: the explicit hosted-upload authorization action (disclosed in the setup UI). While an
+    // attempt runs before its extract handoff it authorizes that attempt; otherwise it starts the next one
+    // authorized. A concurrent start cannot grant; the scan consumes the grant once and never replays it.
+    app.post('/api/setup/scan/hosted-authorization', workViewLoopbackOnly, requireWorkViewOrigin, validateBody(setupHostedAuthorizationBody), this.wrapHandler((_req, res) => {
+      if (!this.setupScan) { res.status(503).json({ error: 'The prompt scan is unavailable on this worker.' }); return; }
+      res.setHeader('Cache-Control', 'no-store');
+      res.json(this.setupScan.grantHostedUpload());
     }));
     app.post('/api/setup/scan/preferences', workViewLoopbackOnly, requireWorkViewOrigin, validateBody(setupScanPreferencesBody), this.wrapHandler((req, res) => {
       if (!this.setupScan) { res.status(503).json({ error: 'The prompt scan is unavailable on this worker.' }); return; }

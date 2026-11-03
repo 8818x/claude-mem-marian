@@ -88,10 +88,6 @@ let initialHosts: string[] = [];
 let taskBatches = 0;
 let bootstrapCalls = 0;
 let httpCalls = 0;
-let piCalls = 0;
-let piResult = 0;
-let dshResult = 0;
-let profiles: Array<string | undefined> = [];
 const lines: string[] = [];
 const reachedTasks = new Error('OWNED_TASK_BOUNDARY');
 mock.module('@clack/prompts', () => ({
@@ -120,12 +116,6 @@ mock.module('../../src/services/hooks/server-bootstrap.js', () => ({
   revokeServerApiKey: async () => { throw new Error('Unexpected server-key revocation'); },
   persistServerSettings: () => true,
 }));
-mock.module('../../src/services/integrations/PiInstaller.js', () => ({
-  installPiExtension: () => { piCalls++; return piResult; },
-}));
-mock.module('../../src/services/integrations/DeepSeekHarnessInstaller.js', () => ({
-  installDeepSeekHarness: async (profile?: string) => { profiles.push(profile); return dshResult; },
-}));
 const http = spyOn(globalThis, 'fetch').mockImplementation(async () => {
   httpCalls++;
   throw new Error('Unexpected HTTP from combined boundary test');
@@ -135,7 +125,7 @@ const exit = spyOn(process, 'exit').mockImplementation((code?: string | number |
 });
 const { SettingsDefaultsManager } = await import('../../src/shared/SettingsDefaultsManager.js');
 const { runInstallCommand, makeIDETask } = await import('../../src/npx-cli/commands/install.js');
-const { createInstallSummary, flushSummary } = await import('../../src/npx-cli/install/error-reporter.js');
+const { createInstallSummary } = await import('../../src/npx-cli/install/error-reporter.js');
 const { detectInstalledIDEs, initialIDESelection } = await import('../../src/npx-cli/commands/ide-detection.js');
 const loadSettings = spyOn(SettingsDefaultsManager, 'loadFromFile');
 const settingsPath = join(data, 'settings.json');
@@ -147,9 +137,9 @@ let provisionedMode: number;
 beforeEach(() => {
   for (const root of [piDir, dshDir]) { rmSync(root, { recursive: true, force: true }); mkdirSync(root, { recursive: true }); }
   rmSync(join(bin, 'claude'), { force: true });
-  selectedHosts = ['pi', 'dsh']; runtimeChoice = 'server';
+  selectedHosts = ['claude-code', 'codex-cli']; runtimeChoice = 'server';
   hostOffers = 0; taskBatches = 0; bootstrapCalls = 0; httpCalls = 0;
-  piCalls = 0; piResult = 0; dshResult = 0; profiles = []; initialHosts = [];
+  initialHosts = [];
   lines.length = 0; loadSettings.mockClear(); exit.mockClear();
   original = Buffer.from(JSON.stringify({
     theme: 'keep-peer',
@@ -193,31 +183,26 @@ function expectUnchangedServerBoundary(): void {
   expect(bootstrapCalls).toBe(0);
   expect(httpCalls).toBe(0);
   expect(taskBatches).toBe(0);
-  expect(piCalls).toBe(0);
-  expect(profiles).toEqual([]);
 }
 describe('combined public installer runtime boundary', () => {
-  for (const ide of ['pi', 'pi-mono', 'dsh', 'deepseek-harness']) {
-    for (const runtime of ['server', 'server-beta'] as const) {
-      it('refuses explicit ' + ide + '/' + runtime + ' before provider loading and server mutation', async () => {
-        await expect(runInstallCommand({ ide, runtime, provider: 'openrouter', serverUrl: 'https://never.example.invalid' }))
-          .rejects.toThrow('EXIT_1');
-        expect(loadSettings).not.toHaveBeenCalled();
-        expectUnchangedServerBoundary();
-        expect(lines.join('\n')).toContain('require --runtime worker');
-      });
-    }
+  for (const ide of ['pi', 'pi-mono', 'dsh', 'deepseek-harness', 'cursor', 'opencode', 'openclaw', 'hermes', 'grok-bot', 'unknown-host', '']) {
+    it('rejects explicit unsupported host ' + JSON.stringify(ide) + ' before installer effects', async () => {
+      await expect(runInstallCommand({ ide, runtime: 'server', provider: 'openrouter', serverUrl: 'https://never.example.invalid' }))
+        .rejects.toThrow('Unsupported installation target');
+      expect(loadSettings).not.toHaveBeenCalled();
+      expectUnchangedServerBoundary();
+    });
   }
   for (const hosts of [['pi'], ['dsh'], ['pi', 'dsh'], ['claude-code', 'pi'], ['opencode', 'dsh']]) {
-    it('refuses interactive server for ' + hosts.join('+') + ' before persistence/bootstrap', async () => {
+    it('rejects unsupported interactive host selection ' + hosts.join('+') + ' before persistence/bootstrap', async () => {
       selectedHosts = hosts;
-      await expect(runInstallCommand({ provider: 'claude' })).rejects.toThrow('EXIT_1');
+      await expect(runInstallCommand({ provider: 'claude' })).rejects.toThrow('Unsupported installation target');
       expectUnchangedServerBoundary();
     });
   }
   it('preserves supported worker selection and the existing personal provider fields', async () => {
     runtimeChoice = 'worker';
-    await expect(runInstallCommand({ provider: 'claude', dshProfile: 'review' })).rejects.toThrow('OWNED_TASK_BOUNDARY');
+    await expect(runInstallCommand({ provider: 'claude' })).rejects.toThrow('OWNED_TASK_BOUNDARY');
     const saved = JSON.parse(readFileSync(settingsPath, 'utf8'));
     expect(saved.theme).toBe('keep-peer');
     expect(saved.env.CLAUDE_MEM_RUNTIME).toBe('worker');
@@ -241,37 +226,22 @@ describe('maintained installation target detection', () => {
     expect(detectInstalledIDEs().map(ide => ide.id)).toEqual(['claude-code', 'codex-cli']);
   });
 });
-describe('combined public integration dispatch and partial summaries', () => {
-  it('dispatches Pi and the requested DSH profile without changing provider choices', async () => {
+describe('unsupported integration install dispatch', () => {
+  it('retains task descriptors for the two maintained hosts', () => {
     const summary = createInstallSummary();
-    await makeIDETask('pi', summary)!.task(() => {});
-    await makeIDETask('dsh', summary, 'review')!.task(() => {});
-    expect(piCalls).toBe(1); expect(profiles).toEqual(['review']);
+    expect(makeIDETask('claude-code', summary)?.title).toContain('Claude Code');
+    expect(makeIDETask('codex-cli', summary)?.title).toContain('Codex CLI');
+  });
+
+  it('rejects retired hosts without installer effects', () => {
+    const summary = createInstallSummary();
+    expect(() => makeIDETask('pi', summary)).toThrow('Unsupported installation target "pi"');
+    expect(() => makeIDETask('dsh', summary)).toThrow('Unsupported installation target "dsh"');
+    expect(() => makeIDETask('omp', summary)).toThrow('Unsupported installation target "omp"');
+    expect(() => makeIDETask('openclaw', summary)).toThrow('Unsupported installation target "openclaw"');
+    expect(() => makeIDETask('hermes', summary)).toThrow('Unsupported installation target "hermes"');
     expect(summary.failedIDEs).toEqual([]); expect(summary.warnings).toEqual([]);
     expect(readFileSync(settingsPath)).toEqual(original);
-  });
-  it('keeps DSH transcript-incomplete result2 warning-only with profile remediation', async () => {
-    dshResult = 2;
-    const summary = createInstallSummary();
-    const line = await makeIDETask('dsh', summary, 'review')!.task(() => {});
-    const output: string[] = [];
-    flushSummary(summary, value => output.push(value));
-    expect(summary.failedIDEs).toEqual([]);
-    expect(summary.warnings).toHaveLength(1);
-    expect(line).toContain('transcript setup incomplete');
-    expect(output.join('\n')).toContain('--dsh-profile review');
-  });
-  it('retains Pi failure with DSH success as a visible per-host partial outcome', async () => {
-    piResult = 1;
-    const summary = createInstallSummary();
-    const piLine = await makeIDETask('pi', summary)!.task(() => {});
-    const dshLine = await makeIDETask('dsh', summary, 'review')!.task(() => {});
-    const output: string[] = [];
-    flushSummary(summary, value => output.push(value));
-    expect(summary.failedIDEs).toEqual(['pi']);
-    expect(piLine).toContain('failed'); expect(dshLine).toContain('installed');
-    expect(output.join('\n')).toContain('Pi');
-    expect(profiles).toEqual(['review']);
   });
 });
 

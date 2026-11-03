@@ -6,10 +6,6 @@ import type { ActiveSession } from '../../src/services/worker-types.js';
 import type { DatabaseManager } from '../../src/services/worker/DatabaseManager.js';
 import type { StorageResult, WorkerRef } from '../../src/services/worker/agents/types.js';
 
-mock.module('../../src/services/worker-service.js', () => ({
-  updateCursorContextForProject: () => Promise.resolve(),
-}));
-
 // Snapshot worker-utils before the stub below replaces it, and restore it in
 // afterAll (see the ModeManager note): left in place, the getWorkerPort-only
 // stub hands 37777 to every later file that reads the worker port.

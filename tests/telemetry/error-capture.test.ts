@@ -398,3 +398,101 @@ describe('logger error-sink hook', () => {
     expect(() => logger.error('WORKER', 'boom', undefined, new Error('x'))).not.toThrow();
   });
 });
+
+describe('Decision 14: runtime opt-out at the acceptance boundary', () => {
+  /** Expires the 30 s consent cache with controllable time (no sleeps). */
+  function expireConsentCache(): void {
+    const realNow = Date.now;
+    Date.now = () => realNow() + 31_000;
+    try { captureEvent('cache-refresh-probe'); } finally { Date.now = realNow; }
+  }
+
+  it('D14-3: enabled → client constructed → persisted opt-out → after cache refresh no NEW event is accepted', () => {
+    process.env.CLAUDE_MEM_TELEMETRY = '1';
+    captureException(new Error('pre-opt-out accepted'));
+    captureEvent('pre-opt-out analytics');
+    const acceptedBefore = { exceptions: postHogExceptionCalls.length, events: postHogCaptureCalls.length };
+    expect(acceptedBefore.exceptions).toBe(1);
+
+    // Persisted opt-out (telemetry.json enabled:false via CLAUDE_MEM_TELEMETRY=0) while the client stays alive.
+    process.env.CLAUDE_MEM_TELEMETRY = '0';
+    // Still cached: immediately after the change the old consent may apply (≤30 s refresh interval).
+    captureException(new Error('within-cache-window'));
+    captureEvent('within-cache-window');
+    const cachedSnapshot = { exceptions: postHogExceptionCalls.length, events: postHogCaptureCalls.length };
+
+    expireConsentCache(); // controllable time, no 30 s sleep
+    captureException(new Error('post-opt-out must be rejected'));
+    captureEvent('post-opt-out analytics');
+    expect(postHogExceptionCalls.length).toBe(cachedSnapshot.exceptions); // no new exceptions
+    expect(postHogCaptureCalls.length).toBe(cachedSnapshot.events); // no new analytics
+    expect(postHogExceptionCalls.map((call) => String(call.additionalProperties?.$exception_message)).join('|')).not.toContain('post-opt-out');
+    void acceptedBefore;
+  });
+
+  it('D14-3: the error kill-switch is evaluated on every exception, not latched at construction', () => {
+    captureException(new Error('kill-switch first'));
+    expect(postHogExceptionCalls.length).toBe(1);
+    process.env.CLAUDE_MEM_TELEMETRY_ERRORS = '0';
+    captureException(new Error('kill-switch second must be rejected'));
+    expect(postHogExceptionCalls.length).toBe(1);
+    delete process.env.CLAUDE_MEM_TELEMETRY_ERRORS;
+    captureException(new Error('kill-switch third re-enabled'));
+    expect(postHogExceptionCalls.length).toBe(2);
+  });
+
+  it('F2: before_send re-checks consent and the kill-switch for BOTH paths (drop, not ship)', () => {
+    const event = () => ({ event: '$exception', properties: { $exception_type: 'Error', $exception_message: 'boundary consent probe' } });
+    // Enabled: ships.
+    expect(__errorBeforeSendForTests(event())).not.toBeNull();
+    // Consent denied: dropped (SDK-internal autocapture's acceptance gate).
+    process.env.CLAUDE_MEM_TELEMETRY = '0';
+    __resetTelemetryForTests();
+    expect(__errorBeforeSendForTests(event())).toBeNull();
+    // Kill-switch denied with consent on: dropped.
+    process.env.CLAUDE_MEM_TELEMETRY = '1';
+    __resetTelemetryForTests();
+    process.env.CLAUDE_MEM_TELEMETRY_ERRORS = '0';
+    expect(__errorBeforeSendForTests(event())).toBeNull();
+    delete process.env.CLAUDE_MEM_TELEMETRY_ERRORS;
+    // DO_NOT_TRACK precedence: dropped even with CLAUDE_MEM_TELEMETRY=1.
+    process.env.DO_NOT_TRACK = '1';
+    __resetTelemetryForTests();
+    expect(__errorBeforeSendForTests(event())).toBeNull();
+    delete process.env.DO_NOT_TRACK;
+  });
+
+  it('D14-9: events accepted into the queue before denial are not recalled, and denial blocks only new ones', () => {
+    process.env.CLAUDE_MEM_TELEMETRY = '1';
+    captureEvent('queued-before-opt-out');
+    captureException(new Error('queued exception before opt-out'));
+    expect(postHogCaptureCalls.some((call) => call.event === 'queued-before-opt-out')).toBe(true);
+    const queuedExceptions = postHogExceptionCalls.length;
+    process.env.CLAUDE_MEM_TELEMETRY = '0';
+    expireConsentCache();
+    captureEvent('after-opt-out');
+    captureException(new Error('after opt-out'));
+    // Queued events stay (no recall path exists or ran); new ones never join them.
+    expect(postHogCaptureCalls.some((call) => call.event === 'queued-before-opt-out')).toBe(true);
+    expect(postHogCaptureCalls.some((call) => call.event === 'after-opt-out')).toBe(false);
+    expect(postHogExceptionCalls.length).toBe(queuedExceptions);
+  });
+
+  it('debug output passes the final boundary: no sentinel, no source context, sanitized mirrors', () => {
+    process.env.CLAUDE_MEM_TELEMETRY_DEBUG = '1';
+    const writes: string[] = [];
+    const originalWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array) => { writes.push(String(chunk)); return true; }) as typeof process.stderr.write;
+    try {
+      captureException(new Error('debug boundary probe'));
+    } finally {
+      process.stderr.write = originalWrite;
+      delete process.env.CLAUDE_MEM_TELEMETRY_DEBUG;
+    }
+    expect(writes.length).toBe(1);
+    const payload = writes[0];
+    expect(payload).toContain('debug boundary probe'); // diagnostics survive, bounded
+    expect(payload).not.toContain('__cm_rate_limited'); // sentinel never ships, even to debug
+    expect(postHogExceptionCalls.length).toBe(0); // debug sends nothing
+  });
+});

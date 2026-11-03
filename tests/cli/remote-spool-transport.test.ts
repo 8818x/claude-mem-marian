@@ -98,12 +98,16 @@ async function child(action: 'observation' | 'stop' | 'flush' | 'poison' | 'post
       new HookSpool().enqueue('summarize', { ...common, lastAssistantMessage: 'done' });
       new HookSpool().enqueue('session_end', common);
     } else if (${JSON.stringify(action)}.startsWith('post_')) {
-      const { windsurfAdapter } = await import(${JSON.stringify(moduleUrl('src/cli/adapters/windsurf.ts'))});
+      // Decision 10: the windsurf adapter is retired — the observation is fed
+      // as a direct normalized generic input (platform raw).
       const { observationHandler } = await import(${JSON.stringify(moduleUrl('src/cli/handlers/observation.ts'))});
-      await observationHandler.execute(windsurfAdapter.normalizeInput({
-        trajectory_id: 'windsurf-remote-session', agent_action_name: ${JSON.stringify(action)},
-        tool_info: { cwd: ${JSON.stringify(root)}, command_line: 'git status', response: 'The checkout is clean.' },
-      }));
+      await observationHandler.execute({
+        sessionId: 'windsurf-remote-session', cwd: ${JSON.stringify(root)}, platform: 'raw',
+        toolName: ${JSON.stringify(action)} === 'post_run_command' ? 'Bash' : 'cascade_response',
+        ...(${JSON.stringify(action)} === 'post_run_command'
+          ? { toolInput: { command: 'git status' } }
+          : { toolResponse: 'The checkout is clean.' }),
+      });
       await settleHookSpoolNudges();
     }
     await uploadRemoteHookSpool();
@@ -129,11 +133,11 @@ describe('remote hook spool forwarding', () => {
     ['post_run_command', { toolName: 'Bash', toolInput: { command: 'git status' } }],
     ['post_cascade_response', { toolName: 'cascade_response', toolResponse: 'The checkout is clean.' }],
   ] as const) {
-    it(`delivers a Windsurf ${action} with omitted tool fields without quarantining it`, async () => {
+    it(`delivers a generic ${action} observation with omitted optional fields without quarantining it`, async () => {
       expect((await child(action)).entries).toEqual([]);
       expect(spool.entries()).toHaveLength(1);
       expect(spool.entries()[0].payload).toMatchObject({
-        contentSessionId: 'windsurf-remote-session', platformSource: 'windsurf', ...expected,
+        contentSessionId: 'windsurf-remote-session', platformSource: 'raw', ...expected,
       });
       const corrupt = join(directory, 'client/state/hook-spool/corrupt');
       expect(existsSync(corrupt) ? readdirSync(corrupt) : []).toEqual([]);

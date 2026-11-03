@@ -1,7 +1,7 @@
 # Server Beta — Release Readiness Report
 
 **Branch**: `server-beta-phase-4-event-pipeline`
-**Reference plan**: `plans/2026-05-07-server-beta-independent-bullmq-observation-runtime.md` (Phase 13)
+**Reference plan**: `docs/upstream/plans/2026-05-07-server-beta-independent-bullmq-observation-runtime.md` (Phase 13)
 **Verified**: 2026-05-08
 **Verifier**: Phase 13 Final Verification subagent (read-only verification mode; no implementation changes)
 

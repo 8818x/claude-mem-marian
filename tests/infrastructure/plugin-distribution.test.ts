@@ -130,6 +130,19 @@ describe('Plugin Distribution - Skills', () => {
   });
 });
 
+describe('Plugin Distribution - retired Qoder launcher precondition', () => {
+  // Task 30: the Qoder launcher assets were removed from the fork; this pins
+  // the precondition and keeps shipped manifests free of Qoder runtime paths.
+  it('ships no Qoder launcher assets and references none from shipped hooks', () => {
+    expect(existsSync(path.join(projectRoot, 'plugin/scripts/qoder-hook-launcher.cjs'))).toBe(false);
+    expect(existsSync(path.join(projectRoot, 'plugin/qoder.mcp.json'))).toBe(false);
+    for (const relative of ['plugin/hooks/hooks.json', 'plugin/hooks/codex-hooks.json']) {
+      if (!existsSync(path.join(projectRoot, relative))) continue;
+      expect(readFileSync(path.join(projectRoot, relative), 'utf-8').toLowerCase()).not.toContain('qoder');
+    }
+  });
+});
+
 describe('Plugin Distribution - Required Files', () => {
   const requiredFiles = [
     'plugin/hooks/hooks.json',
@@ -604,7 +617,7 @@ describe('Plugin Distribution - Non-blocking bookkeeping hooks (#3206)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Spawn-contract templating (plans/02-spawn-contract-templating.md)
+// Spawn-contract templating (docs/upstream/plans/02-spawn-contract-templating.md)
 // ---------------------------------------------------------------------------
 
 const ccTrailing = (...tail: string[]) => [

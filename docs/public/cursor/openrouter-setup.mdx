@@ -3,6 +3,10 @@ title: "Cursor + OpenRouter Setup"
 description: "Use Claude-Mem in Cursor with your OpenRouter key"
 ---
 
+<Note>
+**Modified by the claude-mem-marian fork:** Cursor hook support is retired; the steps below are historical. OpenRouter remains a supported observation provider for maintained Claude Code and Codex CLI installs — see [Installation](/installation).
+</Note>
+
 # Cursor + OpenRouter Setup
 
 Use your OpenRouter key so memory notes run off-plan on your OpenRouter credit. You do **not** clone the repo.
@@ -20,7 +24,7 @@ Use your OpenRouter key so memory notes run off-plan on your OpenRouter credit. 
 npx claude-mem install
 ```
 
-Pick **Cursor**, then pick **your OpenRouter key** as the memory provider.
+Select Claude Code or Codex CLI, then choose your OpenRouter key as the memory provider.
 
 <Warning>
 `npm install -g claude-mem` is the library only. Always install with `npx claude-mem install`.
@@ -38,7 +42,7 @@ cat > ~/.claude-mem/settings.json << 'EOF'
 EOF
 ```
 
-Leave `CLAUDE_MEM_OPENROUTER_BASE_URL` unset for OpenRouter itself. Then re-run `npx claude-mem install` so Cursor hooks and the worker are in place. Do not restart a healthy worker.
+Leave `CLAUDE_MEM_OPENROUTER_BASE_URL` unset for OpenRouter itself. Then re-run installation for the maintained host so its configuration uses the OpenRouter provider. Do not restart a healthy worker.
 
 ## Restart Cursor
 

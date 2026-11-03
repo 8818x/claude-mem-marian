@@ -1,4 +1,5 @@
 /** Setup's subsidized extraction. The wire contract is claude-mem-pro's /api/pro/intent. */
+// Modified by the claude-mem-marian fork: Decision 15 hosted-upload authorization gate.
 import { gzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -44,6 +45,18 @@ export interface HostedIntentState {
   state: 'idle' | 'running' | 'ok' | 'failed';
   reason: 'setup-scan'; step: 'goals' | null; agent: null;
   startedAt: string | null; finishedAt: string | null; error: string | null;
+}
+/** Decision 15: explicit informed hosted-upload authorization for one setup attempt. The shape is
+ * deliberate: absent (undefined), false, null, or malformed values must never authorize
+ * (missing/false/malformed/legacy all deny). The affirmative action is taken in the setup UI under the
+ * Decision 15 disclosure, and the worker rechecks it here at the final boundary before credential issuance
+ * or prompt transmission. An undefined value is a DENIAL, never an omission. */
+export type HostedUploadAuthorization = { authorized: true } | undefined;
+
+/** True only when the value is exactly the authorization shape; anything else denies. */
+export function isHostedUploadAuthorized(authorization: unknown): authorization is HostedUploadAuthorization {
+  return typeof authorization === 'object' && authorization !== null
+    && (authorization as Record<string, unknown>).authorized === true;
 }
 export interface HostedIntentOptions {
   origin: () => string;
@@ -134,7 +147,8 @@ export class HostedIntent {
   state(): HostedIntentState { return { ...this.current }; }
   private iso(): string { return new Date((this.options.now ?? Date.now)()).toISOString(); }
 
-  async run(ownerPrompts: OwnerPrompt[], improveProduct: boolean): Promise<void> {
+  async run(ownerPrompts: OwnerPrompt[], improveProduct: boolean, authorization: HostedUploadAuthorization): Promise<void> {
+    this.current = { state: 'running', reason: 'setup-scan', step: 'goals', agent: null, startedAt: this.iso(), finishedAt: null, error: null };
     this.current = { state: 'running', reason: 'setup-scan', step: 'goals', agent: null, startedAt: this.iso(), finishedAt: null, error: null };
     try {
       // An empty scan has nothing to extract: finish without spending a hosted run or replacing saved work.
@@ -153,6 +167,11 @@ export class HostedIntent {
         this.save(interrupted);
         this.current = { ...this.current, state: 'ok', step: null, finishedAt: this.iso() };
         return;
+      }
+      // Decision 15 gate at the final boundary: after the preserved bypasses, before credential issuance or
+      // any prompt transmission. Missing/false/malformed/legacy authorization never permits an upload.
+      if (!isHostedUploadAuthorized(authorization)) {
+        throw new Error('Hosted setup extraction requires explicit authorization. No prompts were uploaded.');
       }
       const { token, userId } = this.options.credentials();
       if (!!token !== !!userId) throw new Error('Hosted setup has incomplete CMEM account credentials. Repair the account connection before retrying.');

@@ -49,6 +49,13 @@ function postScan(headers: Record<string, string> = { 'Content-Type': 'applicati
   return fetch(`${origin}/api/setup/scan`, { method: 'POST', headers, body });
 }
 
+/** The Decision 15 explicit hosted-authorization action over HTTP: an attempt-scoped grant. */
+function postHostedAuthorization() {
+  return fetch(`${origin}/api/setup/scan/hosted-authorization`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin }, body: '{"authorized":true}',
+  });
+}
+
 /** Reads `setup-scan` events from the work view stream until one reports done. */
 async function scanEventsUntilDone(): Promise<any[]> {
   const controller = new AbortController();
@@ -81,34 +88,67 @@ describe('setup scan endpoints', () => {
     expect((await postScan()).status).toBe(503);
   });
 
-  it('reject a start from outside the viewer page', async () => {
+  it('reject a start from outside the viewer page, and deny malformed authorization at the route', async () => {
     await start(scanWithFixtures());
     expect((await postScan({ 'Content-Type': 'application/json', Origin: 'https://evil.example' })).status).toBe(403);
     expect((await postScan({ 'Content-Type': 'text/plain', Origin: origin })).status).toBe(403);
     expect((await postScan({ 'Content-Type': 'application/json', Origin: origin }, '{"days":5}')).status).toBe(400);
-    expect((await (await fetch(`${origin}/api/setup/scan`)).json()).phase).toBe('idle');
+    // Decision 15: only the literal { authorized: true } authorizes; malformed values are rejected.
+    expect((await postScan(undefined, '{"hostedUpload":{"authorized":false}}')).status).toBe(400);
+    expect((await postScan(undefined, '{"hostedUpload":{"authorized":"yes"}}')).status).toBe(400);
+    expect((await postScan(undefined, '{"hostedUpload":true}')).status).toBe(400);
+  });
+
+  it('the hosted-authorization endpoint grants an attempt, rejects malformed bodies, and works without a running scan', async () => {
+    const setupScan = scanWithFixtures();
+    await start(setupScan);
+    // Malformed body: not the literal { authorized: true } shape.
+    expect((await fetch(`${origin}/api/setup/scan/hosted-authorization`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin }, body: '{"authorized":false}',
+    })).status).toBe(400);
+    expect((await fetch(`${origin}/api/setup/scan/hosted-authorization`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin }, body: '{"authorized":"yes"}',
+    })).status).toBe(400);
+    // No scan running: the grant starts the next attempt authorized; the scan then completes hosted.
+    expect((await postHostedAuthorization()).status).toBe(200);
+    const granted = await (await fetch(`${origin}/api/setup/scan`)).json();
+    expect(granted).toMatchObject({ phase: 'reading', hostedUploadAuthorized: true });
+    await setupScan.finished();
+    const done = await (await fetch(`${origin}/api/setup/scan`)).json();
+    expect(done).toMatchObject({ phase: 'done', hostedUploadAuthorized: true, hostedSkipped: false });
   });
 
   it('keeps a failed extraction stopped until an explicit start and then completes the retry', async () => {
     const setupScan = scanWithFixtures();
-    const attempts: boolean[] = [];
+    const attempts: Array<{ improveProduct: boolean; authorization: unknown }> = [];
     const message = 'Hosted setup failed (HTTP 503): Please try again later.';
-    setupScan.setExtractor(async (_prompts, improveProduct) => {
-      attempts.push(improveProduct);
+    setupScan.setExtractor(async (_prompts, improveProduct, authorization) => {
+      attempts.push({ improveProduct, authorization });
       if (attempts.length === 1) throw new Error(message);
     });
     await start(setupScan);
+    // No authorization: the bare start is local-only and never reaches the extractor.
     expect((await postScan(undefined, '{"improveProduct":false}')).status).toBe(202);
+    await setupScan.finished();
+    const localOnly = await (await fetch(`${origin}/api/setup/scan`)).json();
+    expect(localOnly).toMatchObject({ phase: 'done', hostedUploadAuthorized: false, hostedSkipped: true });
+    expect(attempts).toEqual([]);
+
+    // The explicit Decision 15 authorization action authorizes the next attempt.
+    expect((await postHostedAuthorization()).status).toBe(200);
+    const granted = await (await fetch(`${origin}/api/setup/scan`)).json();
+    expect(granted.hostedUploadAuthorized).toBe(true);
     await setupScan.finished();
     const failed = await (await fetch(`${origin}/api/setup/scan`)).json();
     expect(failed).toMatchObject({ phase: 'failed', done: true, error: message });
-    expect(attempts).toEqual([false]);
+    expect(attempts).toEqual([{ improveProduct: false, authorization: { authorized: true } }]);
 
+    // A bare retry re-scans local-only; the extractor is NOT auto-retried across attempts.
     expect((await postScan()).status).toBe(202);
     await setupScan.finished();
     const retried = await (await fetch(`${origin}/api/setup/scan`)).json();
-    expect(retried).toMatchObject({ phase: 'done', done: true, error: null, improveProduct: false, added: 0 });
-    expect(attempts).toEqual([false, false]);
+    expect(retried).toMatchObject({ phase: 'done', done: true, error: null, improveProduct: false, added: 0, hostedSkipped: true });
+    expect(attempts).toHaveLength(1);
   });
 
   it('start the scan, stream its progress on the work view events, and report where prompts came from', async () => {

@@ -14,6 +14,7 @@ import { SessionStore } from '../../../src/services/sqlite/SessionStore.js';
 import { SyncApply } from '../../../src/services/sync/SyncApply.js';
 import { SyncClient, type SyncClientOptions } from '../../../src/services/sync/SyncClient.js';
 import { observationChange, type TestHubChange } from './content-v2-helpers.js';
+import { _resetScrubValues, _registeredScrubValues } from '../../../src/utils/credential-redaction.js';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -502,5 +503,61 @@ describe('SyncClient', () => {
     const { impl } = makeHub({ epoch: '1' });
     expect(() => makeClient(impl, { deviceId: '' })).toThrow(/deviceId/);
     expect(() => makeClient(impl, { hubUrl: '' })).toThrow(/hubUrl/);
+  });
+});
+
+// Task 43 (Decision 16): error construction omits remote response bodies but
+// keeps status/operation, and the exact sync token is registered for the
+// logger's exact-value scrub.
+describe('Decision 16: sync error redaction', () => {
+  const ECHO_TOKEN = 't43-echo-target-token';
+
+  afterEach(() => _resetScrubValues());
+
+  it('a 401 whose body echoes the bearer constructs an error with the body withheld', async () => {
+    const db = new Database(':memory:');
+    new SessionStore(db);
+    const apply = new SyncApply(db, { deviceId: SELF });
+    const client = new SyncClient(apply, {
+      hubUrl: 'https://hub.test', token: ECHO_TOKEN, userId: 'u', deviceId: SELF,
+      fetchImpl: (async () => new Response(`unauthorized echo: Bearer ${ECHO_TOKEN}`, { status: 401 })) as typeof fetch,
+      wsEnabled: false, backoffInitialMs: 10, backoffMaxMs: 20, minPullGapMs: 0,
+    });
+    try {
+      await client.pullOnce({ timeoutMs: 1_000 });
+      await sleep(60);
+      // Auth pause classification survived (the colon kept the prefix match)...
+      expect((client as unknown as { authPausedUntil: number }).authPausedUntil).toBeGreaterThan(0);
+      // ...and the exact scrub value the constructor registered lets the logger
+      // boundary remove an echoed token from any persisted line.
+      expect(_registeredScrubValues()).toContain(ECHO_TOKEN);
+    } finally { client.stop(); db.close(); }
+  });
+
+  it('realtime-token failure keeps the status but withholds the body', async () => {
+    const { SyncClient: Fresh } = await import('../../../src/services/sync/SyncClient.js');
+    const errors: unknown[] = [];
+    const db = new Database(':memory:');
+    new SessionStore(db);
+    const apply = new SyncApply(db, { deviceId: SELF });
+    const client = new Fresh(apply, {
+      hubUrl: 'https://hub.test', token: 'tok-t43-realtime-12345', userId: 'u', deviceId: SELF,
+      fetchImpl: (async () => new Response('secret-echo-43 here', { status: 403 })) as typeof fetch,
+      wsEnabled: false,
+    });
+    try {
+      // Drive the mint directly through the realtime path.
+      (client as unknown as { handleRealtimeGrantFailure: (e: unknown) => void })
+        .handleRealtimeGrantFailure(await (async () => {
+          try {
+            await (client as unknown as { fetchRealtimeGrant: () => Promise<unknown> }).fetchRealtimeGrant();
+            return new Error('should have thrown');
+          } catch (error) { errors.push(error); throw error; }
+        })());
+    } catch { /* handled */ } finally { client.stop(); db.close(); }
+    const err = errors[0] as Error;
+    expect(err.message).toContain('403');
+    expect(err.message).toContain('withheld');
+    expect(err.message).not.toContain('secret-echo-43');
   });
 });

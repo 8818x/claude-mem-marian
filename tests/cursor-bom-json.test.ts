@@ -2,28 +2,27 @@ import { test, expect } from 'bun:test';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { configureCursorMcp, registerCursorProject } from '../src/utils/cursor-utils';
+import { readCursorRegistry, unregisterCursorProject } from '../src/utils/cursor-utils';
 
 function withFile(run: (file: string) => void) {
   const dir = mkdtempSync(join(tmpdir(), 'cursor-bom-'));
-  try { run(join(dir, 'config.json')); } finally { rmSync(dir, { recursive: true, force: true }); }
+  try { run(join(dir, 'cursor-projects.json')); } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
-test('adding Cursor MCP preserves existing BOM-prefixed configuration', () => withFile(file => {
-  const existing = { mcpServers: { other: { command: 'node', args: ['other.cjs'] } }, custom: true };
-  writeFileSync(file, '\uFEFF' + JSON.stringify(existing));
-  configureCursorMcp(file, '/claude-mem.cjs');
-  const result = JSON.parse(readFileSync(file, 'utf8'));
-  expect(result.mcpServers.other).toEqual(existing.mcpServers.other);
-  expect(result.custom).toBe(true);
-  expect(result.mcpServers['claude-mem'].args).toEqual(['/claude-mem.cjs']);
+// Decision 08: the MCP-install writer retired; the retained registry helpers
+// keep their BOM tolerance (parse) for legacy cursor-projects.json files.
+test('unregistering a workspace preserves BOM-prefixed existing registrations', () => withFile(file => {
+  const existing = { old: { workspacePath: '/old', installedAt: '2026-01-01T00:00:00Z' }, keep: { workspacePath: '/keep', installedAt: '2026-01-01T00:00:00Z' } };
+  writeFileSync(file, '﻿' + JSON.stringify(existing));
+  unregisterCursorProject(file, 'old');
+  const registry = readCursorRegistry(file);
+  expect(registry.old).toBeUndefined();
+  expect(registry.keep).toEqual(existing.keep);
 }));
 
-test('registering a workspace preserves BOM-prefixed existing registrations', () => withFile(file => {
+test('reading a BOM-prefixed registry returns parsed entries', () => withFile(file => {
   const existing = { old: { workspacePath: '/old', installedAt: '2026-01-01T00:00:00Z' } };
-  writeFileSync(file, '\uFEFF' + JSON.stringify(existing));
-  registerCursorProject(file, 'new', '/new');
-  const result = JSON.parse(readFileSync(file, 'utf8'));
-  expect(result.old).toEqual(existing.old);
-  expect(result.new.workspacePath).toBe('/new');
+  writeFileSync(file, '﻿' + JSON.stringify(existing));
+  const registry = readCursorRegistry(file);
+  expect(registry).toEqual(existing);
 }));

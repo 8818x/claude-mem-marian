@@ -1,9 +1,9 @@
+// Modified by the claude-mem-marian fork: retired host routes and cleanup contracts. Upstream attribution is retained.
 import { describe, it, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { antigravityCliAdapter } from '../../../src/cli/adapters/antigravity-cli.js';
 import { SessionStore } from '../../../src/services/sqlite/SessionStore.js';
 import { setIngestContext, ingestObservation } from '../../../src/services/worker/http/shared.js';
 import { buildAgentView, readAgentRecords } from '../../../src/services/work-view/agent-view.mjs';
@@ -16,45 +16,20 @@ import { logger } from '../../../src/utils/logger.js';
 const fixture = JSON.parse(readFileSync(join(import.meta.dir, '../../fixtures/hosts/antigravity-cli-1.4.9-post-tool-use.json'), 'utf8'));
 const CONVERSATION = fixture.callMcpTool.conversationId as string;
 
-/** The captured call_mcp_tool envelope, calling another claude-mem tool. */
-function agyMcpCall(toolName: string, args: Record<string, unknown>, overrides: Record<string, unknown> = {}) {
-  const payload = structuredClone(fixture.callMcpTool);
-  payload.toolCall.args.ToolName = toolName;
-  payload.toolCall.args.Arguments = args;
-  return { ...payload, ...overrides };
+// Decision 11: the agy adapter is retired. These cases exercise the shared
+// ingestion contract with explicit normalized inputs; the captured agy 1.4.9
+// fixture stays checked in as the historical record.
+function normalizedMcpCall(toolName: string, args: Record<string, unknown>, cwd: string, toolUseId = `${CONVERSATION}-step-4`) {
+  return {
+    sessionId: CONVERSATION,
+    cwd,
+    platform: 'antigravity-cli',
+    toolName: `mcp__claude-mem__${toolName}`,
+    toolInput: args,
+    toolResponse: { status: 'completed' },
+    toolUseId,
+  };
 }
-
-describe('antigravityCliAdapter - MCP calls and tool-call identity (agy 1.4.9 payloads)', () => {
-  it('names a call_mcp_tool step after the MCP tool it called, with that tool\'s own arguments', () => {
-    const result = antigravityCliAdapter.normalizeInput(fixture.callMcpTool);
-    expect(result.toolName).toBe('mcp__claude-mem__smart_outline');
-    expect(result.toolInput).toEqual({ file_path: '/home/user/project/dump.sh' });
-    expect(result.toolResponse).toEqual({ status: 'completed' });
-  });
-
-  it('gives every PostToolUse a stable tool-use id from the conversation and step', () => {
-    expect(antigravityCliAdapter.normalizeInput(fixture.callMcpTool).toolUseId).toBe(`${CONVERSATION}-step-4`);
-    const command = antigravityCliAdapter.normalizeInput(fixture.runCommand);
-    expect(command.toolUseId).toBe(`${CONVERSATION}-step-2`);
-    expect(command.toolName).toBe('run_command');
-  });
-
-  it('gives no id when agy sends no step index, and none to invocation events', () => {
-    const { stepIdx: _drop, ...noStep } = fixture.runCommand;
-    expect(antigravityCliAdapter.normalizeInput(noStep).toolUseId).toBeUndefined();
-    const invocation = antigravityCliAdapter.normalizeInput({
-      conversationId: CONVERSATION, workspacePaths: ['/home/user/project'], invocationNum: 1, initialNumSteps: 0,
-    });
-    expect(invocation.toolUseId).toBeUndefined();
-  });
-
-  it('keeps an unrecognised call_mcp_tool shape as agy sent it', () => {
-    const odd = { ...fixture.callMcpTool, toolCall: { name: 'call_mcp_tool', args: { Something: 'else' } } };
-    const result = antigravityCliAdapter.normalizeInput(odd);
-    expect(result.toolName).toBe('call_mcp_tool');
-    expect(result.toolInput).toEqual({ Something: 'else' });
-  });
-});
 
 describe('an agy work_state_write attaches to its own conversation in My Work (#5093)', () => {
   let store: SessionStore;
@@ -79,12 +54,11 @@ describe('an agy work_state_write attaches to its own conversation in My Work (#
     rmSync(workspace, { recursive: true, force: true });
   });
 
-  async function ingestAgy(raw: Record<string, unknown>) {
-    const input = antigravityCliAdapter.normalizeInput(raw);
+  async function ingestNormalized(input: ReturnType<typeof normalizedMcpCall>) {
     return ingestObservation({
-      contentSessionId: input.sessionId!,
+      contentSessionId: input.sessionId,
       platformSource: 'antigravity-cli',
-      toolName: input.toolName!,
+      toolName: input.toolName,
       toolInput: input.toolInput,
       toolResponse: input.toolResponse,
       cwd: input.cwd,
@@ -94,7 +68,7 @@ describe('an agy work_state_write attaches to its own conversation in My Work (#
 
   it('records the write under the agy conversation, and its request_status reaches that conversation\'s card', async () => {
     const fields = { task: 'Ship the agy fix', request_status: 'done' };
-    await ingestAgy(agyMcpCall('work_state_write', { list: 'release', fields }, { workspacePaths: [workspace] }));
+    await ingestNormalized(normalizedMcpCall('work_state_write', { list: 'release', fields }, workspace));
 
     const [row] = store.queryToolUses({ contentSessionId: CONVERSATION });
     expect(row?.tool_name).toBe('mcp__claude-mem__work_state_write');
@@ -116,14 +90,14 @@ describe('an agy work_state_write attaches to its own conversation in My Work (#
   });
 
   it('a replayed PostToolUse for the same step does not add a second row', async () => {
-    const raw = agyMcpCall('work_state_write', { list: 'release', fields: { task: 'Once' } }, { workspacePaths: [workspace] });
-    await ingestAgy(raw);
-    await ingestAgy(raw);
+    const input = normalizedMcpCall('work_state_write', { list: 'release', fields: { task: 'Once' } }, workspace);
+    await ingestNormalized(input);
+    await ingestNormalized(input);
     expect(store.queryToolUses({ contentSessionId: CONVERSATION })).toHaveLength(1);
   });
 
   it('an agy memory search is no longer stored or observed as a new tool call', async () => {
-    const result = await ingestAgy(agyMcpCall('search', { query: 'agy' }, { workspacePaths: [workspace] }));
+    const result = await ingestNormalized(normalizedMcpCall('search', { query: 'agy' }, workspace));
     expect(result).toEqual({ ok: true, status: 'skipped', reason: 'memory_retrieval' });
     expect(store.queryToolUses({})).toHaveLength(0);
   });

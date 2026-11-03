@@ -41,6 +41,23 @@ export const MESSAGE_MAX_CHARS = 500;
 export const STACK_MAX_CHARS = 2048;
 /** Max stack frames kept (top N). */
 export const STACK_MAX_FRAMES = 10;
+/** Decision 14 (F1): max characters for any error type/name representation, AFTER the redaction pipeline. */
+export const EXCEPTION_TYPE_MAX_CHARS = 200;
+
+/**
+ * Decision 14 (F1): runs the full free-text redaction pipeline over an error type/name, then caps it.
+ * Never throws; a missing, invalid, or empty result falls back to `Error`.
+ */
+export function sanitizeErrorType(type: unknown): string {
+  try {
+    if (typeof type !== 'string') return 'Error';
+    const redacted = redactText(collapseWhitespace(capRawInput(type)));
+    const capped = redacted.slice(0, EXCEPTION_TYPE_MAX_CHARS).trim();
+    return capped.length > 0 ? capped : 'Error';
+  } catch {
+    return 'Error';
+  }
+}
 
 /**
  * Hard ceiling on the RAW length of any string a redaction regex is allowed to
@@ -337,8 +354,10 @@ export type ScrubbedError = {
 
 /**
  * Extracts a safe `type` (constructor name) from an arbitrary thrown value.
- * Never throws — objects with throwing getters or null prototypes fall back to
- * 'Error'. Pure.
+ * Decision 14 (F1): every candidate passes the redaction pipeline (sanitizeErrorType)
+ * before it can be returned, so names carrying secrets/paths/URLs are redacted and
+ * capped; a missing, invalid, or empty result is `Error`. Never throws — objects
+ * with throwing getters or null prototypes fall back to 'Error'. Pure.
  */
 export function extractErrorType(err: unknown): string {
   try {
@@ -347,14 +366,14 @@ export function extractErrorType(err: unknown): string {
       try {
         const name = err.name;
         if (typeof name === 'string' && name.length > 0) {
-          return collapseWhitespace(name).slice(0, 100);
+          return sanitizeErrorType(name);
         }
       } catch {
         /* fall through */
       }
       try {
         const ctor = err.constructor?.name;
-        if (typeof ctor === 'string' && ctor.length > 0) return ctor.slice(0, 100);
+        if (typeof ctor === 'string' && ctor.length > 0) return sanitizeErrorType(ctor);
       } catch {
         /* fall through */
       }
@@ -366,7 +385,7 @@ export function extractErrorType(err: unknown): string {
     if (typeof err === 'object') {
       try {
         const ctor = (err as { constructor?: { name?: unknown } }).constructor?.name;
-        if (typeof ctor === 'string' && ctor.length > 0) return ctor.slice(0, 100);
+        if (typeof ctor === 'string' && ctor.length > 0) return sanitizeErrorType(ctor);
       } catch {
         /* fall through */
       }

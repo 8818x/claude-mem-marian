@@ -1,9 +1,10 @@
+// Modified by the claude-mem-marian fork: installer retry guidance lists only maintained Claude Code and Codex CLI targets. Upstream attribution is retained.
 /**
  * Installer error taxonomy — the single source of truth for classifying every
  * failure the universal installer (`npx claude-mem install`) can hit, and the
  * remediation we surface for each.
  *
- * Design constraints (see plans/04-installer-transparency.md):
+ * Design constraints (see docs/upstream/plans/04-installer-transparency.md):
  *  - Fail loud over silent. Unknown errors default to ABORT until classified.
  *  - Remediation strings interpolate the resolved data dir (multi-account safe),
  *    never a hard-coded ~/.claude-mem path.
@@ -153,14 +154,14 @@ export const ERROR_CATEGORIES: ErrorCategory[] = [
     severity: ErrorSeverity.ABORT,
     match: (_cause, ctx) => ctx.component === 'all-ides',
     remediation: () =>
-      'Every selected IDE integration failed. See the per-IDE errors above. Re-run with `--ide=<single>` to isolate the failure.',
+      'Every selected IDE integration failed. See the per-IDE errors above. Re-run with `--ide=claude-code` or `--ide=codex-cli` to isolate the failure.',
   },
   {
     id: 'single-ide-failed',
     severity: ErrorSeverity.FAIL_LOUD_PER_IDE,
     match: (_cause, ctx) => ctx.phase === 'ide-install',
     remediation: () =>
-      'Re-run `npx claude-mem install --ide=<name>` to retry just this IDE. The captured stderr is shown above.',
+      'Re-run `npx claude-mem install --ide=claude-code` or `--ide=codex-cli` to retry a maintained host. The captured stderr is shown above.',
   },
   {
     id: 'path-update-failed',

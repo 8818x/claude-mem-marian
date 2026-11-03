@@ -1,13 +1,24 @@
 ---
 title: "Antigravity CLI Setup"
-description: "Add persistent memory to Antigravity CLI with claude-mem"
+description: "Retired Antigravity CLI integration — legacy hook cleanup and diagnostics only"
 ---
+
+<Warning>
+**Modified by the claude-mem-marian fork:** Antigravity CLI named hooks are retired. Legacy `hook antigravity-cli <event>` invocations are acknowledged without capturing anything. Install/setup routes reject before configuration writes, and the install/capture instructions below are historical. Direct diagnostics and cleanup remain:
+
+```bash
+npx claude-mem antigravity-cli status
+npx claude-mem antigravity-cli uninstall
+```
+
+Status detects legacy artifacts; it is diagnostic, not proof of complete cleanup or current MCP health. Uninstall removes named/recognized legacy hooks, `mcpServers.claude-mem` from both MCP config locations, and tagged context blocks from `~/.gemini/GEMINI.md` and `~/.agents/rules/claude-mem-context.md`, preserving unrelated settings, hooks, MCP servers, and prose. A malformed hooks file is left intact (with its legacy scripts) while later direct steps can still run.
+</Warning>
 
 # Antigravity CLI Setup
 
-> **Give Antigravity CLI persistent memory across sessions.**
+> **Historical guide: Antigravity CLI named-hook capture is retired.**
 
-Antigravity CLI (`agy`) is Google's standalone successor to Gemini CLI — it reuses Gemini CLI's `~/.gemini/` config tree and, per Google, "keeps the most critical features of Gemini CLI: Agent Skills, Hooks, Subagents, and Extensions." Claude-mem changes what happens across sessions by capturing observations, decisions, and patterns — then injecting relevant context into each new session.
+Antigravity CLI (`agy`) is Google's standalone successor to Gemini CLI — it reuses Gemini CLI's `~/.gemini/` config tree and, per Google, "keeps the most critical features of Gemini CLI: Agent Skills, Hooks, Subagents, and Extensions." This page is kept as a historical reference for the inherited integration. Marian no longer captures Antigravity CLI sessions; the sections below describe the retired installer and are useful only for understanding legacy configuration that status/uninstall can inspect or remove.
 
 <Info>
 **How it works:** Claude-mem installs lifecycle hooks into Antigravity CLI's `~/.gemini/config/hooks.json` that capture tool usage, agent responses, and session events. A local worker service extracts semantic observations and injects relevant history at session start — via `GEMINI.md`, an MCP server, and a rules file.
@@ -23,15 +34,19 @@ Antigravity CLI is a different product from the Antigravity **desktop IDE** (`an
 - [Node.js](https://nodejs.org/) 18+
 - The `~/.gemini` directory must exist (created by Antigravity CLI / Gemini CLI on first run)
 
-## Installation
+## Legacy installation reference
 
-### Step 1: Install claude-mem
+The steps below describe the upstream integration. They are not instructions for new Marian installs.
+
+### Step 1: Upstream install command (unsupported by Marian)
+
+Marian rejects this target before writing configuration. The command is retained here only as upstream history.
 
 ```bash
 npx claude-mem install --ide antigravity
 ```
 
-The installer will:
+The upstream installer historically:
 1. Auto-detect Antigravity CLI (checks for `agy` in `PATH`, or an existing `~/.gemini/antigravity` directory)
 2. Install the Antigravity CLI lifecycle hooks into `~/.gemini/config/hooks.json`
 3. Inject context configuration into `~/.gemini/GEMINI.md`
@@ -135,7 +150,7 @@ Claude-mem registers five of the lifecycle hooks Antigravity CLI (`agy` 1.2.1) f
 | **Stop** | `summarize` | Captures the session summary at turn/session end |
 
 <Note>
-These are the event names `agy` reads from `hooks.json`. Earlier releases mistakenly registered Gemini CLI names (`BeforeAgent`, `AfterAgent`, `BeforeTool`, `AfterTool`) into `~/.gemini/settings.json`, where `agy` never reads them, so hooks never fired and no observations were recorded (issue [#4057](https://github.com/thedotmack/claude-mem/issues/4057)). Installs before [#4911](https://github.com/thedotmack/claude-mem/issues/4911) injected context on `PreInvocation`, before every model call, which broke prompt caching; re-run `claude-mem install --ide antigravity` to move it to `SessionStart`. `PreInvocation` is back as `session-init`: it records the prompt and injects file history only after a file read, not on every call. Installs before [#5078](https://github.com/thedotmack/claude-mem/issues/5078) also registered `PreToolUse`, whose `allow` answer skipped agy's permission prompt for every tool; re-running the installer removes it.
+These are the event names `agy` reads from `hooks.json`. Earlier releases mistakenly registered Gemini CLI names (`BeforeAgent`, `AfterAgent`, `BeforeTool`, `AfterTool`) into `~/.gemini/settings.json`, where `agy` never reads them, so hooks never fired and no observations were recorded (issue [#4057](https://github.com/thedotmack/claude-mem/issues/4057)). Installs before [#4911](https://github.com/thedotmack/claude-mem/issues/4911) injected context on `PreInvocation`, before every model call, which broke prompt caching. New Antigravity installation is unsupported in Marian and named capture is retired, so this guide's install-based migration is unavailable. In the final active design, `PreInvocation` routed to `session-init`: it recorded the prompt and injected file history only after a file read, not on every call. Installs before [#5078](https://github.com/thedotmack/claude-mem/issues/5078) also registered `PreToolUse`, whose `allow` answer skipped agy's permission prompt for every tool. Existing configurations remain available for status/uninstall inspection.
 </Note>
 
 ## MCP registration
@@ -176,15 +191,14 @@ Antigravity CLI ships a first-class plugin-marketplace subcommand system: `agy p
    ```
    `timeout` is in **seconds** (agy's default is 30). If you see event names at
    the top level, handlers tagged with `"name": "claude-mem"`, or
-   `"timeout": 10000`, you are on a pre-fix install — re-run the installer
-   below, which migrates the old layout automatically.
+   `"timeout": 10000`, you are on a pre-fix install. Marian does not provide
+   a new-install migration route for Antigravity; preserve the existing config
+   and use the available status/uninstall commands.
 
 2. Restart Antigravity CLI after installation.
 
-3. Re-run the installer:
-   ```bash
-   npx claude-mem install --ide antigravity
-   ```
+3. Marian rejects new Antigravity installs before writes. Use the existing
+   status/uninstall commands to inspect or remove a legacy integration.
 
 ### Worker not running
 
@@ -207,11 +221,7 @@ npx claude-mem restart
 
 ### Raw escape codes in output
 
-If you see characters like `[31m` or `[0m` in the session context, your claude-mem version may need updating — the Antigravity CLI adapter strips ANSI color codes automatically:
-
-```bash
-npx claude-mem install --ide antigravity
-```
+If you see characters like `[31m` or `[0m` in the session context, the upstream Antigravity adapter may need updating. New Marian installations are unsupported; existing configurations can be inspected with status or removed with uninstall.
 
 ## Uninstalling
 

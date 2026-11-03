@@ -10,7 +10,7 @@ import { formatRecalledObservationLine } from './grok-bot-untrusted-text.mjs';
 //
 // Phase 0 (merged as #3934): a deliberate copy of the #3931 atomic append
 // primitive with three — and only three — changes locked by the plan of record
-// (`plans/2026-09-09-ccs-align.md`, D1/D2/§0.1):
+// (`docs/upstream/plans/2026-09-09-ccs-align.md`, D1/D2/§0.1):
 //   1. Tag is `[ccs-align]`, NOT a second `[awareness]` writer.
 //   2. Path root is seat-owned `~/.claude-mem/ccs-align/<viewerId>/`, never
 //      `agents/<id>/memory/log/`.

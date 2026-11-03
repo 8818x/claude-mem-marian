@@ -3,6 +3,8 @@ title: "Configuration"
 description: "Environment variables and settings for Claude-Mem"
 ---
 
+**Modified by the claude-mem-marian fork:** Non-loopback worker binds now require a non-empty `CLAUDE_MEM_TV_TOKEN` at startup — the worker refuses to start otherwise (Decision 17). The provider-key exposure claims below were corrected: known credential-bearing settings are masked in `GET /api/settings` responses, with a masking proof bounded to the allowlisted keys and longer masked values retaining length and final characters.
+
 # Configuration
 
 ## Settings File
@@ -479,12 +481,12 @@ The host setting and the token work as a pair:
 |---|---|---|
 | `127.0.0.1` (default) | empty | Today. Nothing reachable off-box. **Recommended for everyone not using the TV remotely.** |
 | `127.0.0.1` | set | Token is inert — nothing can reach the port anyway. Harmless. |
-| `0.0.0.0` | **empty** | **Dangerous, and unchanged from today**: the full API — settings incl. provider API keys, deletes, import, better-auth — is on the LAN. This is what the Docker setup already tells people to do, so the worker warns rather than refuses to bind. |
+| `0.0.0.0` (or any non-loopback host) | **empty** | **Refused**: the worker exits at startup instead of listening. A tokenless non-loopback bind would put the full unauthenticated API — memory reads and writes, settings writes, import, better-auth — on the network. Known credential-bearing settings (provider API keys, the TV and ingest tokens) are masked in `GET /api/settings` responses — a longer masked value keeps its length and its final four characters — but that masking is an allowlist of known keys only; any unlisted credential is outside the guarantee. The Docker stack runs the separate server runtime behind API-key auth and never starts this worker, so nothing documented relies on a tokenless non-loopback worker bind. |
 | `0.0.0.0` | set | The point of the feature. LAN devices reach `/tv`, `/tv.html`, `/stream`, `GET /api/observations` with the secret, and get 404/403/401 for everything else. |
 
-Booting with a non-loopback host and no token logs a `SECURITY` warning; the worker still binds.
+Booting with a non-loopback host — `0.0.0.0`, `::`, an empty value, a LAN IP, or any name that is not an established loopback form (`127.0.0.1`, `::1`, `::ffff:127.0.0.1`) — and no token refuses before the port is opened: the worker logs the refusal and exits non-zero. There is no override flag. Setting a non-empty token lets startup proceed with the existing read-only remote guard.
 
-**A local port-forward reopens the whole API.** The guard exempts loopback by socket peer, so anything that arrives *as* loopback bypasses it entirely — including `ssh -L <port>:127.0.0.1:<port> <box>` from another device, or any local forwarding proxy. To the worker that traffic is indistinguishable from the operator's own browser, so it gets the full API, `GET /api/settings` and its provider API keys included. This is the one concrete way "the device can do nothing else" stops being true: only forward the port to devices you would hand the machine to.
+**A local port-forward reopens the whole API.** The guard exempts loopback by socket peer, so anything that arrives *as* loopback bypasses it entirely — including `ssh -L <port>:127.0.0.1:<port> <box>` from another device, or any local forwarding proxy. To the worker that traffic is indistinguishable from the operator's own browser, so it gets the full API — including `GET /api/settings`, where known credential-bearing settings are masked (an allowlist of known keys; longer masked values retain length and final four characters) but memory and settings writes are fully reachable. This is the one concrete way "the device can do nothing else" stops being true: only forward the port to devices you would hand the machine to.
 
 **Docker and bridge networking.** With `CLAUDE_MEM_WORKER_HOST=0.0.0.0` inside a bridge-network container, requests from the host's own browser arrive from the bridge gateway address, not `127.0.0.1`. Once a token is set, that browser is treated as remote like any other device and must supply `?token=` to open the TV — and the React viewer at `/` is denied outright, exactly as it is for any other remote device.
 
@@ -494,7 +496,7 @@ Open the TV on the second device at `http://<lan-ip>:<port>/tv.html?token=<secre
 
 **Treat the URL as the secret.** The token rides in the query string for `/stream` because the browser's `EventSource` API cannot set request headers. It is *not* written to the worker log (the request logger records `req.path`, which excludes the query string), but it **will** be in the browser's history on the device you open it on. `Authorization: Bearer <token>` and `X-Api-Key: <token>` also work for anything that can set headers.
 
-**This is plain HTTP.** The token stops an unauthenticated device from reading the stream; it does not encrypt it. Anyone who can sniff your LAN sees observation titles. For a home network that is the accepted tradeoff; for anything else, terminate TLS in front of the worker (out of scope here) — and still never a tunnel to the unmodified worker, which would publish `GET /api/settings` and its provider API keys to the open internet.
+**This is plain HTTP.** The token stops an unauthenticated device from reading the stream; it does not encrypt it. Anyone who can sniff your LAN sees observation titles. For a home network that is the accepted tradeoff; for anything else, terminate TLS in front of the worker (out of scope here) — and still never a tunnel to the unmodified worker, which would publish the full unauthenticated API to the open internet (credential-bearing settings are masked per above; writes are not authenticated).
 
 **Use the exact paths.** The allowlist is exact-match and case-sensitive: `/tv.html`, `/tv`, `/stream`, `/api/observations` and nothing else. A trailing slash or a different case — `/tv/`, `/API/observations`, `/api/observations/by-file` — returns 404 even with a valid token. That is deliberate fail-closed behavior, not a bug.
 
@@ -505,8 +507,10 @@ Accepted risks, stated plainly:
 1. **`GET /api/observations` returns full observation bodies** — `narrative`, `facts`, `text`, `files_read`, `files_modified` — for **every project on the box**, not just the four fields the TV renders. A token holder can page through the entire memory database with `offset`.
 2. **`/stream` is unfiltered.** It carries every observation for every project on the box, plus the project catalog and processing status. There is no per-client filtering.
 3. **No rate limiting.** A token holder can hammer `GET /api/observations` freely.
-4. **The token is readable on loopback** via `GET /api/settings`, exactly like your provider API keys are today. It is deliberately *not* writable through `POST /api/settings` (that route is unauthenticated), so it can only be set by someone with filesystem or environment access.
+4. **The token is readable on loopback** via `GET /api/settings` as a masked value, under the same masking as every known credential-bearing setting. It is deliberately *not* writable through `POST /api/settings` (that route is unauthenticated), so it can only be set by someone with filesystem or environment access.
 5. **`/stream` is not side-effect-free.** Every new connection triggers an `initial_load` broadcast to *all* connected clients, and the client list is unbounded. A token holder reconnecting in a loop can therefore disturb the operator's own local viewer. This is pre-existing worker behavior; the token is what newly makes it reachable from the LAN.
+
+**Related boundaries, unchanged by the token requirement.** Spool ingestion (`POST /api/spool/ingest`) keeps its own independent bearer authentication (`CLAUDE_MEM_WORKER_INGEST_TOKEN`), checked before body parsing; the TV token is not accepted there, and the ingest token does not open TV routes. The local HTTP MCP server stays loopback-only and refuses any non-loopback bind target. The Docker stack runs the separate server runtime with `CLAUDE_MEM_AUTH_MODE=api-key`, not this worker. Loopback processes keep the documented local trust model: a local process that sends no Origin can read masked settings and write settings and memories.
 
 ### Manual Configuration
 

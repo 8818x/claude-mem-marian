@@ -1,3 +1,4 @@
+// Modified by the claude-mem-marian fork: unsupported host hook routes (Cursor, Kimi, Windsurf, Antigravity CLI) refuse before any side effect. Upstream attribution is retained.
 import { readJsonFromStdin } from './stdin-reader.js';
 import { getPlatformAdapter } from './adapters/index.js';
 import { AdapterRejectedInput } from './adapters/errors.js';
@@ -86,7 +87,37 @@ async function executeHookPipeline(
   return exitCode;
 }
 
+// Retired-host refusal contracts live in ./retired-hooks.js (leaf module); the npx CLI imports them from there so its Node bundle never pulls this graph.
+export {
+  RETIRED_CURSOR_HOOK_STDOUT, RETIRED_CURSOR_HOOK_STDERR,
+  RETIRED_KIMI_HOOK_STDOUT, RETIRED_KIMI_HOOK_STDERR,
+  RETIRED_WINDSURF_HOOK_STDOUT, RETIRED_WINDSURF_HOOK_STDERR,
+  RETIRED_ANTIGRAVITY_HOOK_STDOUT, RETIRED_ANTIGRAVITY_HOOK_STDERR,
+  refuseRetiredCursorHook, isRetiredCursorHookPlatform,
+  refuseRetiredKimiHook, isRetiredKimiHookPlatform,
+  refuseRetiredWindsurfHook, isRetiredWindsurfHookPlatform,
+  refuseRetiredAntigravityHook, isRetiredAntigravityHookPlatform,
+} from './retired-hooks.js';
+import {
+  refuseRetiredCursorHook, isRetiredCursorHookPlatform,
+  refuseRetiredKimiHook, isRetiredKimiHookPlatform,
+  refuseRetiredWindsurfHook, isRetiredWindsurfHookPlatform,
+  refuseRetiredAntigravityHook, isRetiredAntigravityHookPlatform,
+} from './retired-hooks.js';
+
 export async function hookCommand(rawPlatform: string, event: string, options: HookCommandOptions = {}): Promise<number> {
+  if (isRetiredCursorHookPlatform(rawPlatform)) {
+    return refuseRetiredCursorHook(options);
+  }
+  if (isRetiredKimiHookPlatform(rawPlatform)) {
+    return refuseRetiredKimiHook(options);
+  }
+  if (isRetiredWindsurfHookPlatform(rawPlatform)) {
+    return refuseRetiredWindsurfHook(options);
+  }
+  if (isRetiredAntigravityHookPlatform(rawPlatform)) {
+    return refuseRetiredAntigravityHook(options);
+  }
   const platform = canonicalIntegrationId(rawPlatform);
   resetHookIoState();
   resetWorkerUnreachableState();

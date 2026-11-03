@@ -9,12 +9,14 @@ import { scrubProperties } from './scrub.js';
 import {
   scrubError,
   messageTemplate,
-  scrubMessage,
-  redactHomeDir,
-  redactAbsolutePaths,
 } from './error-scrub.js';
 import { getTelemetryApiKey, getTelemetryHost, buildBaseProperties, buildPersonSet } from './common.js';
 import { telemetryBuffer } from './buffer.js';
+import {
+  rebuildExceptionProperties,
+  stripConditionalIdentifiers,
+  RATE_LIMITED_SENTINEL,
+} from './exception-boundary.js';
 // logger.warn ONLY in this module — logger.error routes through the error sink
 // back into captureException (logger.ts setErrorSink), which would recurse.
 import { logger } from '../../utils/logger.js';
@@ -215,65 +217,11 @@ function applyErrorRateLimitInner(
 }
 
 /**
- * Private marker our manual captureException() stamps into additionalProperties
- * (which lands in event.properties before before_send runs). Its presence tells
- * errorBeforeSend "this $exception was ALREADY redacted + rate-limited by the
- * manual path — pass it through unchanged, just strip this marker so it never
- * ships to PostHog." Events WITHOUT it are SDK autocapture and get the full
- * redaction + rate-limit treatment. Never sent to ingest.
+ * Decision 14: the manual path's rate-limit sentinel is imported from the final
+ * boundary (exception-boundary.ts). It may bypass DUPLICATE RATE ACCOUNTING only:
+ * the manual $exception still passes the same rebuild (sanitization/bounds) and
+ * consent re-check as SDK autocapture before it can ship.
  */
-const RATE_LIMITED_SENTINEL = '__cm_rate_limited';
-
-/**
- * Redacts a single frame `filename` (or any path-bearing string): home dir → ~,
- * then absolute path → basename. Reuses the error-scrub helpers (pure/total).
- * Never throws.
- */
-function redactFilename(value: unknown): string {
-  try {
-    if (typeof value !== 'string' || value.length === 0) return '';
-    return redactAbsolutePaths(redactHomeDir(value));
-  } catch (error) {
-    // Fail to an empty string — never ship an unredacted path.
-    const err = error instanceof Error ? error : new Error(String(error));
-    logger.warn('SYSTEM', 'Telemetry: frame filename redaction failed; stripping value entirely', undefined, err);
-    return '';
-  }
-}
-
-/**
- * Fully REDACTS an SDK-autocaptured $exception event in place: posthog-node's
- * addSourceContext reads the user's real source files off disk and attaches
- * raw `context_line`/`pre_context`/`post_context` (SOURCE CODE) plus
- * `filename` to every frame, and the RAW unredacted message in `value`. This
- * strips all of it. Mutates and returns the same props object. Never throws.
- */
-function redactAutocapturedExceptionList(props: Record<string, unknown>): void {
-  const list = props.$exception_list;
-  if (!Array.isArray(list)) return;
-  for (const entry of list) {
-    if (!entry || typeof entry !== 'object') continue;
-    const ex = entry as Record<string, unknown>;
-    // Redact the raw message.
-    if (typeof ex.value === 'string') ex.value = scrubMessage(ex.value);
-    // Redact / strip each frame.
-    const trace = ex.stacktrace as { frames?: unknown } | undefined;
-    const frames = trace?.frames;
-    if (Array.isArray(frames)) {
-      for (const frame of frames) {
-        if (!frame || typeof frame !== 'object') continue;
-        const f = frame as Record<string, unknown>;
-        // DELETE raw source lines entirely — never send them.
-        delete f.context_line;
-        delete f.pre_context;
-        delete f.post_context;
-        // Redact the absolute filename to a basename (home → ~).
-        if (typeof f.filename === 'string') f.filename = redactFilename(f.filename);
-        // function/lineno/colno are lower-risk — left as-is.
-      }
-    }
-  }
-}
 
 /**
  * True when a $exception describes an OS working-directory permission fault
@@ -310,73 +258,83 @@ function isEnvironmentChdirError(props: Record<string, unknown>): boolean {
 }
 
 /**
- * before_send hook applied to the worker client. It ONLY governs $exception
- * events; every other event passes through unchanged.
+ * Test-only: the properties a $exception event carried BEFORE the final rebuild
+ * (post SDK enrichment). The real-SDK loopback test reads it to PROVE the SDK
+ * actually attached source context / conditional identifiers (trigger
+ * activation), so removal is not proven against an absent trigger. Never used
+ * by production logic; overwritten on every $exception.
+ */
+let preBoundaryExceptionProps: Record<string, unknown> | null = null;
+/** Test-only accessor for the pre-boundary capture (see above). */
+export function __preBoundaryExceptionForTests(): Record<string, unknown> | null {
+  return preBoundaryExceptionProps;
+}
+
+/**
+ * Decision 14 final exception boundary, installed as the client's before_send.
+ * posthog-node runs it for BOTH our manual captureException() events AND the
+ * SDK's uncaught-exception autocapture, after enrichment and before
+ * serialization. The same contract applies to both paths:
  *
- * posthog-node runs before_send for BOTH our manual captureException() events
- * AND the SDK's uncaught-exception autocapture, so this hook MUST distinguish
- * them:
- *
- *  - MANUAL (carries RATE_LIMITED_SENTINEL): already redacted by scrubError and
- *    already rate-limited/counted by captureException's applyErrorRateLimit
- *    call. Re-running the limiter here would double-count (corrupting
- *    occurrence_count) and split the fingerprint keyspace. So we pass it through
- *    UNCHANGED, only deleting the private sentinel so it never reaches ingest.
- *
- *  - AUTOCAPTURE (no sentinel): posthog-node's addSourceContext has attached the
- *    user's RAW source code (context_line/pre_context/post_context) and the RAW
- *    unredacted message + absolute filenames. We FULLY REDACT the
- *    $exception_list, force $process_person_profile:false, then apply the
- *    fingerprint rate-limiter (returning null drops duplicates before billing).
+ *  - F7: conditional SDK identifiers ($release_id/$trace_id/$span_id) are
+ *    stripped from EVERY event (including non-exception events) after SDK
+ *    attachment; frame chunk_id is never copied (rebuilt away).
+ *  - F2: consent AND the error kill-switch are re-checked here for every
+ *    $exception. Denial drops the event before ingest — this is the SDK-
+ *    internal autocapture path's acceptance gate (the SDK's own queue cannot
+ *    be intercepted earlier), while our manual captureExceptionInner already
+ *    refuses new events before queue acceptance.
+ *  - F5/F1/F3/F6/F7: the exception list/frames are REBUILT from an explicit
+ *    allowlist (rebuildExceptionProperties), so source context can never exist
+ *    on the output, every type/message mirror is sanitized/bounded, and the
+ *    manual rate-limit sentinel bypasses DUPLICATE RATE ACCOUNTING only — it
+ *    never bypasses consent, sanitization, or bounds.
  *
  * NEVER throws. On ANY error we return null (DROP) rather than risk shipping an
- * unredacted autocaptured event — failing closed is the safe one-way-door
- * default here. The error-scrub helpers are pure/total so this is belt-and-
- * suspenders.
+ * unredacted event — failing closed is the safe one-way-door default here.
  */
 function errorBeforeSend(event: EventMessage | null): EventMessage | null {
   try {
     if (!event || typeof event !== 'object') return event;
     const ev = event;
+    // F7: conditional identifiers go from every event, exceptions included.
+    stripConditionalIdentifiers(ev);
     if (ev.event !== '$exception') return event;
 
     const props = (ev.properties ?? {}) as Record<string, unknown>;
+    // Test hook: keep the pre-boundary fixture for the real-SDK removal proof.
+    preBoundaryExceptionProps = props;
 
     // Drop OS working-directory permission faults (EPERM/EACCES on chdir).
     // These are environment errors — e.g. a Windows worker whose inherited cwd
     // is an ACL-locked Microsoft Store directory, which makes cross-spawn's
     // post-spawn cwd restore throw — not claude-mem defects, so they only add
-    // noise to error tracking. The daemon pins its cwd to the data dir at boot
-    // (pinDaemonWorkingDirectory, #3252), which prevents the common case; this
-    // catches any residual variant. Runs ahead of the sentinel branch so it
-    // covers BOTH the manual (captureException) and SDK-autocapture paths.
+    // noise to error tracking. Runs ahead of everything else, both paths.
     if (isEnvironmentChdirError(props)) return null;
 
-    // MANUAL path: already redacted + counted. Strip the sentinel and pass
-    // through unchanged — do NOT re-redact or re-run the limiter.
-    if (props[RATE_LIMITED_SENTINEL]) {
-      try {
-        delete props[RATE_LIMITED_SENTINEL];
-        ev.properties = props;
-      } catch {
-        /* best-effort marker strip */
-      }
+    // F2: consent + kill-switch re-checked at the final boundary for BOTH paths.
+    if (!hasConsent() || !isErrorTelemetryEnabled(process.env)) return null;
+
+    const manual = props[RATE_LIMITED_SENTINEL] === true;
+    // F5/F1/F3/F6/F7: rebuild from the allowlist — identical treatment for both
+    // paths; the sentinel (dropped inside the rebuild) skips only the limiter.
+    const rebuilt = rebuildExceptionProperties(props);
+    props.$process_person_profile = false;
+    rebuilt.$process_person_profile = false;
+
+    if (manual) {
+      // Manual path: already counted by captureExceptionInner. occurrence_count
+      // survives the rebuild; no second rate-accounting pass.
+      ev.properties = rebuilt;
       return event;
     }
 
-    // AUTOCAPTURE path (no sentinel): redact the raw source/message the SDK
-    // attached BEFORE anything else, so even an early return can't leak.
-    redactAutocapturedExceptionList(props);
-    props.$process_person_profile = false;
-    ev.properties = props;
-
-    // Derive a fingerprint from the (now-redacted) attached data. posthog-node's
-    // autocapture stamps $exception_list; fall back to type/message props.
+    // Autocapture: fingerprint from the REBUILT (sanitized) data, then decide.
     let type = 'Error';
     let message = '';
     let stack = '';
     try {
-      const list = props.$exception_list;
+      const list = rebuilt.$exception_list;
       if (Array.isArray(list) && list[0] && typeof list[0] === 'object') {
         const first = list[0] as Record<string, unknown>;
         if (typeof first.type === 'string') type = first.type;
@@ -389,20 +347,16 @@ function errorBeforeSend(event: EventMessage | null): EventMessage | null {
     } catch {
       /* fall through to prop-based fingerprint */
     }
-    if (typeof props.$exception_type === 'string') type = props.$exception_type;
-    if (typeof props.$exception_message === 'string') message = props.$exception_message;
+    if (typeof rebuilt.$exception_type === 'string') type = rebuilt.$exception_type;
+    if (typeof rebuilt.$exception_message === 'string') message = rebuilt.$exception_message;
 
     // fingerprintError already applies messageTemplate internally — pass the
-    // raw (redacted) message, do not pre-template it (S1).
+    // sanitized message, do not pre-template it (S1).
     const fingerprint = fingerprintError(type, message, stack);
     const decision = applyErrorRateLimit(fingerprint, Date.now());
     if (!decision.send) return null; // dropped before ingest — not billed
-    try {
-      props.occurrence_count = decision.count;
-      ev.properties = props;
-    } catch {
-      /* property attach is best-effort */
-    }
+    rebuilt.occurrence_count = decision.count;
+    ev.properties = rebuilt;
     return event;
   } catch {
     // Fail CLOSED: dropping is strictly safer than risking an unredacted leak.
@@ -498,8 +452,11 @@ function captureExceptionInner(
   };
 
   if (process.env.CLAUDE_MEM_TELEMETRY_DEBUG === '1') {
+    // Decision 14: the final boundary covers debug output too — the printed
+    // payload passes the same rebuild, so debug can never show source context,
+    // conditional identifiers, or the internal sentinel.
     process.stderr.write(
-      '[telemetry] ' + JSON.stringify({ event: '$exception', additionalProperties }) + '\n'
+      '[telemetry] ' + JSON.stringify({ event: '$exception', additionalProperties: rebuildExceptionProperties(additionalProperties) }) + '\n'
     );
     return;
   }

@@ -566,3 +566,133 @@ describe('#2753: buildIsolatedEnv resolves CLAUDE_CONFIG_DIR for the SDK subproc
     expect(result.CLAUDE_CONFIG_DIR).toBe('/tmp/from-setting-with-slash');
   });
 });
+
+// Task 43 (Decision 16): the Claude SDK child-environment allowlist matrix,
+// with a REAL spawned child (Stage L) printing sentinel MATCH results only.
+describe('Decision 16: Claude child allowlist matrix', () => {
+  const MATRIX_DIR = fs.mkdtempSync(join(tmpdir(), 't43-matrix-'));
+  const MATRIX_ENV_FILE = join(MATRIX_DIR, '.env');
+  const saved: Array<[string, string | undefined]> = [];
+
+  function set43(name: string, value: string): void {
+    saved.push([name, process.env[name]]);
+    process.env[name] = value;
+  }
+
+  function restore43(): void {
+    while (saved.length) {
+      const [name, value] = saved.pop()!;
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+
+  const ALL_SENTINELS = {
+    ANTHROPIC_API_KEY: 'file-anthropic-key-43',
+    ANTHROPIC_FALLBACK_API_KEY: 'file-fallback-43',
+    ANTHROPIC_BASE_URL: 'https://file-gateway-43.example',
+    ANTHROPIC_AUTH_TOKEN: 'file-auth-token-43',
+    GEMINI_API_KEY: 'file-gemini-selected-43',
+    GEMINI_API_KEYS: 'file-pool-a,file-pool-b',
+    OPENROUTER_API_KEY: 'file-openrouter-43',
+    OPENROUTER_API_KEYS: 'file-or-pool-a,file-or-pool-b',
+    OPENAI_COMPAT_API_KEY: 'file-openai-43',
+    OPENAI_COMPAT_API_KEYS: 'file-oc-pool-a,file-oc-pool-b',
+  };
+  const PARENT_SENTINELS: Array<[string, string]> = [
+    ['AWS_ACCESS_KEY_ID', 'sentinel-aws-id-43'],
+    ['AWS_SECRET_ACCESS_KEY', 'sentinel-aws-secret-43'],
+    ['GITHUB_TOKEN', 'ghp_sentinel4343434343434343434343434343434343'],
+    ['DATABASE_URL', 'postgres://u:pw-43@h/db'],
+    ['ARBITRARY_SECRET_43', 'arbitrary-secret-43'],
+    ['CLAUDE_CODE_OAUTH_TOKEN', 'stale-parent-oauth-43'],
+  ];
+
+  beforeAll(() => {
+    fs.mkdirSync(MATRIX_DIR, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(MATRIX_ENV_FILE, Object.entries(ALL_SENTINELS).map(([k, v]) => `${k}=${v}`).join('\n') + '\n', { mode: 0o600 });
+    process.env.CLAUDE_MEM_ENV_FILE = MATRIX_ENV_FILE;
+  });
+
+  afterAll(() => {
+    restore43();
+    fs.rmSync(MATRIX_DIR, { recursive: true, force: true });
+    if (ORIGINAL_ENV_FILE === undefined) delete process.env.CLAUDE_MEM_ENV_FILE;
+    else process.env.CLAUDE_MEM_ENV_FILE = ORIGINAL_ENV_FILE;
+  });
+
+  afterEach(restore43);
+
+  it('buildIsolatedEnv: Anthropic family in, pools and unrelated parent secrets out', () => {
+    for (const [name, value] of PARENT_SENTINELS) set43(name, value);
+    set43('HTTP_PROXY', 'http://proxy-43:8080');
+    const env = buildIsolatedEnv();
+    expect(env.ANTHROPIC_API_KEY).toBe('file-anthropic-key-43');
+    expect(env.ANTHROPIC_BASE_URL).toBe('https://file-gateway-43.example');
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe('file-auth-token-43');
+    expect(env.ANTHROPIC_FALLBACK_API_KEY).toBeUndefined();
+    expect(env.GEMINI_API_KEY).toBeUndefined();
+    expect(env.GEMINI_API_KEYS).toBeUndefined();
+    expect(env.OPENROUTER_API_KEY).toBeUndefined();
+    expect(env.OPENROUTER_API_KEYS).toBeUndefined();
+    expect(env.OPENAI_COMPAT_API_KEY).toBeUndefined();
+    expect(env.OPENAI_COMPAT_API_KEYS).toBeUndefined();
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined(); // stale parent OAuth denied
+    expect(env.GITHUB_TOKEN).toBeUndefined();
+    expect(env.DATABASE_URL).toBeUndefined();
+    expect(env.ARBITRARY_SECRET_43).toBeUndefined();
+    expect(env.AWS_ACCESS_KEY_ID).toBe('sentinel-aws-id-43');
+    expect(env.AWS_SECRET_ACCESS_KEY).toBe('sentinel-aws-secret-43');
+    expect(env.CLAUDE_MEM_INTERNAL).toBe('1');
+    expect(env.CLAUDE_CODE_ENTRYPOINT).toBe('sdk-ts');
+  });
+
+  it('Stage L: a real spawned child receives exactly the built env (sentinel MATCH booleans only)', async () => {
+    for (const [name, value] of PARENT_SENTINELS) set43(name, value);
+    const env = buildIsolatedEnv();
+    const probe = `
+      const checks = {
+        anthropic: process.env.ANTHROPIC_API_KEY === 'file-anthropic-key-43',
+        baseurl: process.env.ANTHROPIC_BASE_URL === 'https://file-gateway-43.example',
+        poolGemini: 'GEMINI_API_KEYS' in process.env,
+        poolOpenRouter: 'OPENROUTER_API_KEYS' in process.env,
+        poolOpenAI: 'OPENAI_COMPAT_API_KEYS' in process.env,
+        github: 'GITHUB_TOKEN' in process.env,
+        database: 'DATABASE_URL' in process.env,
+        arbitrary: 'ARBITRARY_SECRET_43' in process.env,
+        awsId: process.env.AWS_ACCESS_KEY_ID === 'sentinel-aws-id-43',
+        internal: process.env.CLAUDE_MEM_INTERNAL === '1',
+        oauthStale: 'CLAUDE_CODE_OAUTH_TOKEN' in process.env,
+      };
+      process.stdout.write(JSON.stringify(checks));
+    `;
+    const proc = Bun.spawn([process.execPath, '-e', probe], { env: env as Record<string, string>, stdout: 'pipe' });
+    const output = await new Response(proc.stdout).text();
+    await proc.exited;
+    const checks = JSON.parse(output);
+    expect(checks.anthropic).toBe(true);
+    expect(checks.baseurl).toBe(true);
+    expect(checks.awsId).toBe(true);
+    expect(checks.internal).toBe(true);
+    expect(checks.poolGemini).toBe(false);
+    expect(checks.poolOpenRouter).toBe(false);
+    expect(checks.poolOpenAI).toBe(false);
+    expect(checks.github).toBe(false);
+    expect(checks.database).toBe(false);
+    expect(checks.arbitrary).toBe(false);
+    expect(checks.oauthStale).toBe(false);
+  });
+
+  it('includeCredentials=false suppresses every credential exception, cloud names included', () => {
+    set43('AWS_SECRET_ACCESS_KEY', 'sentinel-aws-secret-43');
+    set43('AWS_ACCESS_KEY_ID', 'sentinel-aws-id-43');
+    const env = buildIsolatedEnv(false);
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    expect(env.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+    expect(env.AWS_ACCESS_KEY_ID).toBeUndefined();
+    // Runtime names are not credentials; they still pass.
+    expect(env.PATH).toBeDefined();
+  });
+});

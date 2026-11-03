@@ -55,13 +55,34 @@ async function start(refresh: ReturnType<typeof fakeRefresh>, ledger: { dir: str
   return setupScan;
 }
 
+let scratchDir: string | null = null;
+
 afterEach(async () => {
   routes.close();
   store?.close();
+  // Delete the scratch dir only after routes.close(): the routes' sqlite reader holds it until then.
+  if (scratchDir) { const path = scratchDir; scratchDir = null; await rmScratchRetrying(path); }
   await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
 });
 
+
+// Windows: a just-closed SessionStore's handles can release ~1s late (measured), so an immediate recursive
+// rm of the scratch dir fails EBUSY. Retry briefly instead of failing the suite.
+async function rmScratchRetrying(path: string): Promise<void> {
+  for (const wait of [0, 100, 250, 500, 1000]) {
+    await new Promise(resolve => setTimeout(resolve, wait));
+    try { rmSync(path, { recursive: true, force: true }); return; }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EBUSY' && code !== 'EPERM') throw error;
+    }
+  }
+  throw new Error(`Scratch cleanup could not remove ${path} after retries.`);
+}
+
 const postScan = () => fetch(`${origin}/api/setup/scan`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin }, body: '{}' });
+// Decision 15: an authorized attempt posts the explicit hostedUpload grant (extractor handoff included).
+const postAuthorizedScan = () => fetch(`${origin}/api/setup/scan`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin }, body: '{"hostedUpload":{"authorized":true}}' });
 const snapshot = async () => (await fetch(`${origin}/api/work-view`)).json() as Promise<any>;
 
 describe('setup extraction', () => {
@@ -88,7 +109,7 @@ describe('setup extraction', () => {
       expect(requests).toBe(0);
       expect(existsSync(intentConfigPath)).toBe(false);
       expect(refresh.runs).toEqual([]);
-    } finally { rmSync(scratch, { recursive: true, force: true }); }
+    } finally { scratchDir = scratch; }
   });
 
   it('waits for hosted extraction before done and never starts the local setup agent', async () => {
@@ -106,7 +127,7 @@ describe('setup extraction', () => {
       },
     };
     const scan = await start(refresh, null, hosted);
-    expect((await postScan()).status).toBe(202);
+    expect((await postAuthorizedScan()).status).toBe(202);
     for (let wait = 0; !complete && wait < 100; wait++) await Bun.sleep(10);
     expect(scan.state()).toMatchObject({ phase: 'uploading', done: false });
     expect((await snapshot()).setup.extraction).toMatchObject({ state: 'running' });
@@ -123,7 +144,7 @@ describe('setup extraction', () => {
   it('keeps the hosted reason in the existing scan error slot', async () => {
     const message = 'Hosted setup failed (HTTP 413): Input exceeds the 400000-token cost cap. No prompts were truncated.';
     const scan = await start(fakeRefresh(), null, { state: () => ({ state: 'failed', reason: 'setup-scan', step: null, agent: null, startedAt: null, finishedAt: null, error: message }), async run() { throw new Error(message); } });
-    await postScan();
+    await postAuthorizedScan();
     await scan.finished();
     expect(scan.state()).toMatchObject({ phase: 'failed', done: true, error: message });
     expect((await snapshot()).setup.scan.error).toBe(message);
@@ -131,11 +152,11 @@ describe('setup extraction', () => {
 
   it('passes the unchecked preference through after scanning and still completes', async () => {
     let improveProduct: boolean | undefined;
-    const scan = await start(fakeRefresh(), null, { state: () => ({ state: 'ok', reason: 'setup-scan', step: null, agent: null, startedAt: null, finishedAt: null, error: null }), async run(_prompts, flag) { improveProduct = flag; } });
+    const scan = await start(fakeRefresh(), null, { state: () => ({ state: 'ok', reason: 'setup-scan', step: null, agent: null, startedAt: null, finishedAt: null, error: null }), async run(_prompts, flag, authorization) { improveProduct = flag; } });
     expect(scan.state().improveProduct).toBe(true);
     const changed = await fetch(`${origin}/api/setup/scan/preferences`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin }, body: JSON.stringify({ improveProduct: false }) });
     expect(changed.status).toBe(200);
-    await postScan();
+    await postAuthorizedScan();
     await scan.finished();
     expect(improveProduct).toBe(false);
     expect(scan.state()).toMatchObject({ phase: 'done', done: true });
@@ -170,7 +191,7 @@ describe('setup extraction', () => {
         }) as typeof fetch,
       });
       const scan = await start(fakeRefresh(), { databasePath, dir: ledgerDir }, hosted);
-      await postScan();
+      await postAuthorizedScan();
       await scan.finished();
       expect(requests).toEqual(['https://cloud.example/api/installer/intent', 'https://cloud.example/api/pro/intent']);
       const view = await snapshot();
@@ -180,7 +201,7 @@ describe('setup extraction', () => {
       expect(view.rules[0].then).toBe('Test the change.');
       expect(view.setup.work.length).toBeGreaterThan(0);
       expect(view.setup.work[0].title).toStartWith('Request ');
-    } finally { rmSync(scratch, { recursive: true, force: true }); }
+    } finally { scratchDir = scratch; }
   });
 
   it('work comes from the request groups, newest prompt first, with a percent only from a review with evidence', async () => {
@@ -210,6 +231,6 @@ describe('setup extraction', () => {
         { groupId: 'g_000000000002', title: 'New thing', platform: 'codex', lastActiveAt: '2026-10-09T10:00:00.000Z', progressPercent: 35 },
         { groupId: 'g_000000000001', title: 'Old thing', platform: 'claude', lastActiveAt: '2026-10-01T10:00:00.000Z', progressPercent: null },
       ]);
-    } finally { rmSync(scratch, { recursive: true, force: true }); }
+    } finally { scratchDir = scratch; }
   });
 });

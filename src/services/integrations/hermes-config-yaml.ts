@@ -1,3 +1,5 @@
+// Modified by the claude-mem-marian fork: installer-only helpers were retired with the Hermes installer; receipt-driven cleanup keeps the line-edit helpers it needs. Upstream attribution is retained.
+
 /**
  * Line edits to Hermes's config.yaml for the two keys claude-mem owns there:
  * `memory.provider` and `mcp_servers.claude-mem`.
@@ -118,23 +120,6 @@ function hasChildren(lines: string[], block: Block): boolean {
   return lines.slice(block.header + 1, block.end).some(isContent);
 }
 
-/** Open a block for children, preserving comments and inserting before a document-end marker. */
-function openBlock(lines: string[], key: string): Block {
-  const existing = findBlock(lines, key);
-  if (existing) {
-    lines[existing.header] = lines[existing.header].replace(/^([^:]+:)[ \t]*(?:\{\}|null|~)/, '$1');
-    return existing;
-  }
-  const documentEnd = lines.findIndex(line => /^\.\.\.(?:\s|$)/.test(line));
-  if (documentEnd !== -1) {
-    lines.splice(documentEnd, 0, key + ':');
-    return { header: documentEnd, end: documentEnd + 1, childIndent: 2 };
-  }
-  while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop();
-  lines.push(key + ':');
-  return { header: lines.length - 1, end: lines.length, childIndent: 2 };
-}
-
 /** What `memory:` looked like before claude-mem selected itself, so uninstall can put it back. */
 export interface ProviderReceipt {
   /** The original `memory:` header line, or null when claude-mem added the block. */
@@ -156,32 +141,7 @@ function providerLineIndex(lines: string[], block: Block): number {
   return index;
 }
 
-export function readMemoryProvider(text: string): string | null {
-  const { lines } = splitLines(text);
-  const block = findBlock(lines, 'memory');
-  if (!block) return null;
-  const index = providerLineIndex(lines, block);
-  return index === -1 ? null : scalar(lines[index]);
-}
-
-export function selectMemoryProvider(text: string, provider: string): { text: string; receipt: ProviderReceipt } {
-  const { lines, eol, bom } = splitLines(text);
-  const before = findBlock(lines, 'memory');
-  const memoryHeader = before ? lines[before.header] : null;
-  const block = openBlock(lines, 'memory');
-  const index = providerLineIndex(lines, block);
-  const line = ' '.repeat(block.childIndent) + 'provider: ' + provider;
-  let providerLine: string | null = null;
-  if (index === -1) {
-    lines.splice(block.header + 1, 0, line);
-  } else {
-    providerLine = lines[index];
-    lines[index] = line;
-  }
-  return { text: joinLines(lines, eol, bom), receipt: { memoryHeader, providerLine } };
-}
-
-/** Undo selectMemoryProvider, but only while `provider` is still selected:
+/** Undo install's provider selection, but only while `provider` is still selected:
  *  a provider the user chose since is theirs. */
 export function restoreMemoryProvider(text: string, provider: string, receipt: ProviderReceipt): string {
   const { lines, eol, bom } = splitLines(text);
@@ -202,23 +162,11 @@ export function restoreMemoryProvider(text: string, provider: string, receipt: P
   return joinLines(lines, eol, bom);
 }
 
-export interface McpServerEntry {
-  command: string;
-  args: string[];
-  env?: Record<string, string>;
-}
-
 /** The original `mcp_servers:` header, or null when claude-mem added the block. */
 export interface McpReceipt {
   mcpHeader: string | null;
   /** Exact installed lines; an edited or legacy entry is no longer owned. */
   installedEntry: string;
-}
-
-export function hasMcpServer(text: string, name: string): boolean {
-  const { lines } = splitLines(text);
-  const block = findBlock(lines, 'mcp_servers');
-  return block !== null && childLine(lines, block, name) !== -1;
 }
 
 export function matchesMcpReceipt(text: string, name: string, receipt: McpReceipt): boolean {
@@ -228,34 +176,6 @@ export function matchesMcpReceipt(text: string, name: string, receipt: McpReceip
   if (!block) return false;
   const index = childLine(lines, block, name);
   return index !== -1 && lines.slice(index, childEnd(lines, block, index)).join('\n') === receipt.installedEntry;
-}
-
-function entryLines(name: string, entry: McpServerEntry, indent: number): string[] {
-  const pad = ' '.repeat(indent);
-  const inner = ' '.repeat(indent + 2);
-  // JSON strings are valid YAML double-quoted scalars, whatever the path holds.
-  const lines = [pad + name + ':', inner + 'command: ' + JSON.stringify(entry.command), inner + 'args:'];
-  for (const arg of entry.args) lines.push(inner + '  - ' + JSON.stringify(arg));
-  if (entry.env && Object.keys(entry.env).length > 0) {
-    lines.push(inner + 'env:');
-    for (const [key, value] of Object.entries(entry.env)) lines.push(inner + '  ' + key + ': ' + JSON.stringify(value));
-  }
-  lines.push(inner + 'enabled: true');
-  return lines;
-}
-
-/** Add `mcp_servers.<name>`, replacing an entry of that name (callers decide
- *  whether an existing entry is theirs to replace). */
-export function putMcpServer(text: string, name: string, entry: McpServerEntry): { text: string; receipt: McpReceipt } {
-  const { lines, eol, bom } = splitLines(text);
-  const before = findBlock(lines, 'mcp_servers');
-  const mcpHeader = before ? lines[before.header] : null;
-  const block = openBlock(lines, 'mcp_servers');
-  const index = childLine(lines, block, name);
-  const replacement = entryLines(name, entry, block.childIndent);
-  if (index === -1) lines.splice(block.header + 1, 0, ...replacement);
-  else lines.splice(index, childEnd(lines, block, index) - index, ...replacement);
-  return { text: joinLines(lines, eol, bom), receipt: { mcpHeader, installedEntry: replacement.join('\n') } };
 }
 
 export function removeMcpServer(text: string, name: string, receipt: McpReceipt): string {

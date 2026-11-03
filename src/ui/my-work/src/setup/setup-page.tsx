@@ -88,6 +88,17 @@ export default function SetupPage({ onComplete }: { onComplete: () => void }) {
     }
   }
 
+  // Decision 15: the hosted choice is its own explicit action. A failed authorization request leaves the
+  // choice in place (still undecided): the user acts again.
+  const [hostedError, setHostedError] = useState<string | null>(null)
+  const grantHostedUpload = async () => {
+    if (!source) return
+    setHostedError(null)
+    try { await source.grantHostedUpload() } catch (error) {
+      setHostedError(`Could not record that choice: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   const [flow, setFlow] = useState<SetupFlowState>(() => initialFlowState(false))
   const [requested, setRequested] = useState<SetupStep>('scan')
   const update = (changes: Partial<SetupFlowState>, next?: SetupStep) => { setFlow((current) => ({ ...current, ...changes })); if (next) setRequested(next) }
@@ -159,7 +170,7 @@ export default function SetupPage({ onComplete }: { onComplete: () => void }) {
   const installerFailed = data.installer?.stage === 'failed'
 
   const screens: Record<SetupStep, () => ReactNode> = {
-    scan: () => <ScanScreen scan={{ ...data.scan, improveProduct: improveProduct ?? data.scan.improveProduct }} onImproveProductChange={(checked) => void changeImproveProduct(checked)} preferenceError={preferenceError} onRetry={() => void retryScan()} retrying={retrying} retryError={retryError} />,
+    scan: () => <ScanScreen scan={{ ...data.scan, improveProduct: improveProduct ?? data.scan.improveProduct }} onImproveProductChange={(checked) => void changeImproveProduct(checked)} onGrantHostedUpload={() => void grantHostedUpload()} hostedError={hostedError} preferenceError={preferenceError} onRetry={() => void retryScan()} retrying={retrying} retryError={retryError} />,
     reveal: () => <RevealScreen agents={data.scan.agents} reveal={data.reveal} extraction={data.extraction} recentPrompts={data.recentPrompts} onContinue={() => update({ revealContinued: true }, 'choice')} />,
     choice: () => <ChoiceScreen branch={flow.branch} onChoose={(branch) => update({ branch, memoryBilling: branch === 'go' ? 'hosted' : 'existing', choiceContinued: true, savingsComplete: false, checkoutReviewed: false, setupComplete: false, finishTools: [] }, 'savings')} />,
     savings: () => (

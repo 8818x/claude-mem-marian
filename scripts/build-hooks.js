@@ -1139,10 +1139,6 @@ async function buildHooks() {
     console.log(`   - Transcript Watcher: transcript-watcher.cjs`);
     console.log(`   Output: ${npxCliOutDir}/`);
     console.log(`   - NPX CLI: index.js`);
-    if (fs.existsSync('openclaw/dist/index.js')) {
-      console.log(`   Output: openclaw/dist/`);
-      console.log(`   - OpenClaw Plugin: index.js`);
-    }
     if (fs.existsSync('dist/opencode-plugin/index.js')) {
       console.log(`   Output: dist/opencode-plugin/`);
       console.log(`   - OpenCode Plugin: index.js`);

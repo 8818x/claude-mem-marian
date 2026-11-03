@@ -55,7 +55,7 @@ describe('work-state hook receipts', () => {
     } finally { setSessionInitDependenciesForTesting(); }
   });
 
-  for (const platform of ['claude-code', 'codex', 'cursor']) {
+  for (const platform of ['claude-code', 'codex']) {
     it(`measures final ${platform} adapter output after stdout flush`, async () => {
       const handler = spyOn(getEventHandler('context'), 'execute').mockResolvedValue({
         workStateTelemetry: 'measure',
@@ -74,7 +74,7 @@ describe('work-state hook receipts', () => {
         await hookCommand(platform, 'context', { skipExit: true });
         expect(chunks.join('')).not.toContain('workStateTelemetry');
         const [receipt] = spooledEntries('work_state_telemetry');
-        expect(receipt.payload.state).toBe(platform === 'cursor' ? 'missing' : 'returned');
+        expect(receipt.payload.state).toBe('returned');
       } finally {
         handler.mockRestore();
         process.stdout.write = original;

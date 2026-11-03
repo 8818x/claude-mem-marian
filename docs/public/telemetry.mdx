@@ -17,12 +17,16 @@ The standard [`DO_NOT_TRACK`](https://consoledonottrack.com) environment variabl
 
 ## How instrumentation works
 
-Claude-mem has a single instrumentation path (`instrument()` in `src/services/telemetry/instrument.ts`). Every observable event is described once and fans out to two sinks:
+There is no single `instrument()` file; the capture paths are concrete and auditable in `src/services/telemetry/`:
+
+- **The worker** runs a long-lived posthog-node client (`telemetry.ts`). Errors reach it two ways: the logger's error sink calls `captureException` (manual path), and — when the worker constructed the client with exception autocapture — the SDK's own uncaught-exception/unhandled-rejection hooks (autocapture path). Both pass the same final sanitization boundary before anything is queued for ingest.
+- **The short-lived CLI** (installer/update/uninstall, `cli-telemetry.ts`) posts single events directly to ingestion with a 2-second timeout, after the same consent gate and whitelist scrubber.
+- **The historical backfill** (`backfill.ts`) posts anonymized daily rollups once, gated by the same consent chain.
+
+Every path fans out from the same data to two sinks:
 
 - **The local logger — always, at full fidelity.** Logging keeps working with telemetry off, and the local log never goes through the scrubber. This is where the complete, unredacted detail lives — on your machine.
 - **Telemetry — only when consent passes.** The telemetry copy is scrubbed (the [whitelist](#what-is-collected) for structured properties; [allow-then-redact](#error-tracking) for error text) and, for high-volume events, rolled up into per-session/per-window aggregates before anything is sent.
-
-So a single source of truth produces both the rich local log and the minimal, privacy-preserving telemetry — they never drift, and the scrubbing only ever happens on the telemetry branch.
 
 **Note on session replay:** PostHog session replay is **not applicable** to claude-mem. Replay records a browser DOM session; claude-mem's only browser surface, the local My Work viewer, loads no PostHog browser SDK — it reports two usage counts (`work_view_opened`, `work_view_switched`) to the worker, which sends them through the same client and whitelist as everything else — so there is nothing to replay and it is never enabled.
 
@@ -75,7 +79,7 @@ Every event property passes through a strict whitelist scrubber — any key not 
 | `trial_days` | `30` | Assigned CMEM Pro installer offer length: 30 days (older events may report 7 or 14) |
 | `trial_variant` | `test_30` | Trial assignment identifier: control_7 / test_14 / test_30; all current arms grant 30 days |
 | `offer_surface` / `funnel_source` | `installer` / `installer` | Closed source labels on the installer offer exposure event |
-| `stage` | `awaiting_checkout` | Installer trial polling stage: awaiting_login / awaiting_checkout / awaiting_approval |
+| `stage` | `awaiting_login` | Installer OAuth pairing stage: awaiting_login / awaiting_checkout / awaiting_approval |
 | `phase` | `login` | Installer OAuth pairing phase — a closed enum: login / enrollment / deferred |
 | `provider_source` | `default` | How the installer decided the provider — a closed enum: flag (`--provider` given) / default (non-interactive fresh install fell back to claude) / persisted (non-interactive run reused the configured provider) / prompt (interactive choice) |
 | `mode` | `code` | Active claude-mem mode id (our mode list) |
@@ -144,11 +148,7 @@ One value is derived server-side rather than sent by the client: PostHog resolve
 | `installer_oauth_start_failed` | `POST /api/installer/oauth/start` did not return a usable pairing | `version`, `outcome` (http_error / network / timeout / bad_body), `interactive`, `phase` (login / deferred) |
 | `installer_oauth_deferred` | A non-interactive install that skipped sign-in printed the optional sign-in link at the end | `version`, `interactive` (always `false`) |
 | `install_failed` | The installer aborts | `error_category` (our error-taxonomy id), `interactive`, `install_method`, `claude_code_version` |
-| `pro_offer_viewed` | A CMEM Pro offer is displayed in the installer | `trial_days`, `trial_variant`, `offer_surface` (`installer`), `funnel_source` (`installer`) |
-| `trial_email_submitted` | The user submits an email to start the installer trial flow | `version` only — never the email |
-| `trial_link_sent` | The trial start API accepts the request and sends a sign-in link | `version`, `duration_ms` — never the email, link, pairing secret, or device code |
 | `trial_activated` | Trial credentials are received and saved after browser approval | `version`, `duration_ms` |
-| `trial_poll_timeout` | Browser completion polling is cancelled, expires, times out, or becomes unreachable | `version`, `stage`, `outcome`, `duration_ms` |
 | `uninstall_completed` | `npx claude-mem uninstall` finishes | — |
 | `worker_started` | The background worker starts, plus one heartbeat per 24h of uptime | `trigger` (start / heartbeat), `duration_ms`, `ide`, `provider`, `mode`, `runtime_mode`, process memory (`process_rss_mb`, `heap_used_mb`), the install snapshot: `db_observation_count`, `db_session_count`, `db_summary_count`, `db_project_count`, `db_size_mb`, `install_age_days`, `obs_count_7d`, `obs_count_30d`, `days_since_last_obs`; on a real start also crash detection: `previous_shutdown` (crash / clean / unknown) and, after a clean shutdown, `previous_uptime_seconds` |
 | `observer_turn_rollup` | Emitted **once per session, at session end** — a per-session rollup that aggregates every compression in that session (stored observations, invalid-output drops, failures, aborts) instead of one event per turn | `rollup_reason` (session_end / worker_shutdown / safety_flush), `window_seq`, aggregated `outcomes_*` counts (including `outcomes_aborted_deadline_exceeded`), `total_tokens_input`, `total_tokens_output`, `total_cost_usd`, `avg_duration_ms`, `avg_compression_ms`, `top_model`, `top_abort_reason` (the most common `abort_reason` among the session's aborted turns; present only when one aborted), `observed_model`, `observed_billing`, `observations_created` (sum of observations generated in the session — pairs with `total_cost_usd` to derive cost per observation), summed `obs_type_*` buckets, `window_start_ts`, plus the per-turn fields it summarizes (`provider`, `ide`) |
@@ -158,12 +158,11 @@ One value is derived server-side rather than sent by the client: PostHog resolve
 | `skill_invoked` | A bundled skill is invoked — the host Skill tool loads its instructions, or the user types a first-party `/skill` at session-init. **Not** work completion; no `duration_ms` / outcome. Worker path only. Unknown `/foo` emits nothing. | `skill_id` (closed enum + `other`), `skill_source` (`first_party` / `third_party`), `skill_trigger` (`tool` / `prompt`), `ide` |
 | `work_view_opened` | The local My Work viewer (`http://localhost:37777`) is opened in a browser. The page reports it over `POST /api/work-view/usage` (loopback and same-origin only) and the worker sends it; the page loads no PostHog SDK | `view` (setup / work / rules / suggested / past-focus) |
 | `work_view_switched` | The viewer switches between its pages — My Work, My Rules, Suggested, Past focus, or setup finishing into My Work | `view`, `previous_view` |
-| `worker_stopped` | The background worker shuts down gracefully | `uptime_seconds`, `shutdown_reason` (stop / restart / signal / idle) |
+| `worker_stopped` | The background worker shuts down gracefully. Known limitation: delivery on Windows after a hard process kill is not directly probed — a crash can lose this final event | `uptime_seconds`, `shutdown_reason` (stop / restart / signal / idle) |
 | `supervisor_registry_degraded` | The worker could not write its process registry (`supervisor.json`, e.g. an unwritable data directory) and kept it in memory instead. Sent once per degraded episode, not once per failed write | `error_category` (the filesystem error code, e.g. `EACCES` / `EROFS` / `ENOSPC`, or `unknown`) |
 | `worker_start_failed` | A worker this launcher started died before it became ready. Sent by the launcher that started it, never by one that only waited for another launcher's worker | `outcome` (`dead`), `error_category` (`boot_crash` when the crash could be reproduced, `port_unbindable` when the worker port cannot be bound, `launch_failed` when the daemon process could not be launched at all, such as no Bun runtime or `Start-Process` refused, else `unreachable_after_boot`); never the crash text, which stays in the local log |
 | `usage_limit_hit` | The Claude subscription behind the observer reports a window as `rejected` — since the observer shares the observed session's account, this is when the user's own Claude Code session ran out of usage. Emitted once per exhausted window (deduped on the window's reset time; a worker restart while still capped re-emits once). Only fires when the observer runs on Claude with a subscription login — API-key, Gemini, and OpenRouter observers never see it | `limit_window` (five_hour / seven_day / seven_day_opus / seven_day_sonnet / overage / unknown), `overage_status` (allowed / allowed_warning / rejected / unknown), `is_using_overage`, `resets_in_minutes`, `ide`, `provider`, `observed_model`, `observed_billing` |
 | `hook_failed` | A claude-mem hook fails hard — the worker is unreachable past the fail-loud threshold, or a blocking error occurs | `hook_type`, `error_mode`, `consecutive_failures`, `threshold_tripped`, `pre_latch_state` |
-| `error_occurred` | The worker returns an HTTP 5xx | `error_category` |
 | `$exception` | A real error is captured for [error tracking](#error-tracking) — consent-gated and independently kill-switchable | Redacted `error_type` / `error_message` / `error_stack`, `occurrence_count`, plus whitelisted context. See [Error tracking](#error-tracking) for exactly what is kept vs. redacted |
 
 ### Work-state usage and diagnostic limits
@@ -223,23 +222,27 @@ Claude-mem captures real errors to PostHog Error Tracking as `$exception` events
 
 **What is kept (redacted):**
 
-- The error **type** (constructor name, e.g. `TypeError`), capped to 100 chars.
-- The error **message**, redacted and capped to 500 chars.
-- The **stack trace** — only the top 10 frames, each redacted, capped to ~2KB total.
+- The error **type** (constructor name, e.g. `TypeError`), run through the same redaction pipeline and capped to 200 chars (`Error` when nothing valid survives). Every type mirror — the SDK exception list entry, `$exception_type`, `error_type` — derives from that one sanitized value.
+- The error **message**, redacted and capped to 500 chars; the exception list is capped to its first 10 entries.
+- The **stack trace** — only the top 10 frames per event, each frame's `filename`/`function` redacted and capped to 200 chars, with a 2,048-character serialized-stacktrace budget per event (trailing frames drop first). Frames carry no `module` field; line/column numbers are kept only when they are finite positive integers.
 - An `occurrence_count` (how many times this error fingerprint fired in the current window).
 
-**What is redacted out of that text** (replaced with `[REDACTED]`, in this order):
+**Removed before send, on both capture paths (manual and SDK autocapture):** the SDK's frame source-context fields (`context_line` / `pre_context` / `post_context` — any source code the SDK reads off disk), `module`, `chunk_id`, and the conditional SDK identifiers `$release_id` / `$trace_id` / `$span_id` (from every event, not only exceptions). They are removed after SDK enrichment at the final boundary before serialization; they are never replaced with other identifiers.
 
-- Home directory (`/Users/you` → `~`) — first, so a username embedded in the home path never survives.
-- Absolute filesystem paths → collapsed to basename (POSIX, Windows drive, and UNC paths) — keeps "which file" without the directory tree.
-- URL / connection-string credentials and query strings — userinfo (`user:pass@`) and `?…`/`#…` are stripped from any `scheme://…` (http, ws, postgres, redis, mongodb+srv, amqp, …), so DB connection-string creds and signed-URL tokens die.
-- Emails.
-- API tokens and keys: provider-prefixed keys (`sk-`, `phc_`, `ghp_`, `xoxb-`, …), Bearer tokens, **AWS access key IDs** (`AKIA…`), JWTs, UUIDs, long hex blobs (24+ chars), and generic high-entropy tokens.
-- **IPv4 addresses** (internal IPs/hostnames that leak in network errors).
+**What is redacted out of that text** (replaced with `[REDACTED]`, in the implemented order):
+
+1. Home directory (`/Users/you` → `~`) — first, so a username embedded in the home path never survives.
+2. URL / connection-string credentials and query strings — userinfo (`user:pass@`) and `?…`/`#…` are stripped from any `scheme://…` (http, ws, postgres, redis, mongodb+srv, amqp, …), before path collapse destroys the `://`.
+3. Absolute filesystem paths → collapsed to basename (POSIX, Windows drive, and UNC paths) — keeps "which file" without the directory tree. **Disclosed limitation:** basenames and directory trees below `~` (and already-relative paths) intentionally survive.
+4. Residual query fragments left behind by path collapse.
+5. Assignment-style secrets (`token=…`, `api_key=…`).
+6. Secret-shaped substrings: emails, provider-prefixed keys (`sk-`, `phc_`, `ghp_`, `xoxb-`, …), Bearer tokens, **AWS access key IDs** (`AKIA…`), JWTs, UUIDs, long hex blobs (24+ chars), generic high-entropy tokens, and **IPv4 addresses** (internal IPs/hostnames that leak in network errors).
 
 The redaction pipeline is **pure and never throws** — hostile input (null, circular, objects with throwing getters, 200KB blobs) always yields a safe, bounded result, because telemetry must never break or block the worker. Raw input is hard-capped at 8KB before any regex runs (ReDoS defense).
 
-**Rate-limiting.** At most **one `$exception` per error fingerprint per 60 seconds**. Errors are fingerprinted by type + a normalized message template + top stack frame, so a storm of the "same" error with varying ids/numbers dedupes to a single send with an occurrence count attached. This applies to both our manual captures and any SDK autocapture. (Autocapture is additionally re-scrubbed before send — raw source-context lines that posthog-node reads off disk are deleted, and filenames are redacted to basenames.)
+**Rate-limiting.** At most **one `$exception` per error fingerprint per 60 seconds**. Errors are fingerprinted by type + a normalized message template + top stack frame, so a storm of the "same" error with varying ids/numbers dedupes to a single send with an occurrence count attached. This applies to both our manual captures and any SDK autocapture (the manual path's internal rate-limit marker bypasses only this duplicate accounting — never consent, sanitization, or bounds).
+
+**Consent is re-checked at the final boundary for every exception.** Both capture paths re-check `hasConsent()` and the error kill-switch just before an event can be accepted/serialized. The persisted consent is cached for at most 30 seconds, so a `telemetry disable` (or `DO_NOT_TRACK`) stops acceptance of new events within that window — no worker restart needed. Two honest queue boundaries: events **already accepted** into the SDK's queue before denial became effective are still delivered (nothing is recalled), and exception **autocapture instrumentation exists only in a client constructed with it** — if telemetry was disabled when the worker started, no autocapture instrumentation is created; enabling consent later takes effect for manual captures immediately (within the cache window) but the autocapture instrumentation appears only after a worker restart.
 
 **Consent-gated, with an independent kill-switch.** Error capture is gated by the normal telemetry consent chain (opting out of telemetry disables errors too) **and** by a separate `CLAUDE_MEM_TELEMETRY_ERRORS` switch — see [How to opt out](#how-to-opt-out-four-ways). No person profile is built for `$exception` events (`$process_person_profile: false`).
 
@@ -270,18 +273,18 @@ A few things worth knowing:
 | Never collected | Notes |
 |---|---|
 | Prompts or conversation content | Not even truncated or hashed |
-| File paths or directory names | Redacted out of analytics entirely, and redacted out of error text (home dir → `~`, absolute paths → basename) — see [Error tracking](#error-tracking) |
-| Source code | In any form — including the source-context lines posthog-node would otherwise attach to autocaptured exceptions (deleted before send) |
+| File paths or directory names | Redacted out of analytics entirely; in error text the home dir becomes `~` and absolute paths collapse to a basename — basenames and trees below `~` intentionally survive (see [Error tracking](#error-tracking)) |
+| Source code | The SDK's frame source-context fields (`context_line` / `pre_context` / `post_context`) are removed from **both** capture paths before send — verified against the real SDK transport. No broader guarantee is claimed for arbitrary free-form error text: an error message that happens to contain code can carry it like any other text |
 | Project or repository names | Including git remotes and branch names |
 | Search queries | Only the fact that a search happened |
 | IP addresses | Never attached to events by the client; the sender IP is used transiently at ingest to derive coarse location (country / region / city), then discarded — the analytics project is configured to never store sender IPs |
 | Hardware or machine identifiers | Not even hashed MAC addresses or hostnames |
-| Environment variable values | Ever |
+| Environment variable values | There is no intentional collection of arbitrary environment values; documented configuration-derived metadata (version strings, provider choice, billing enum) and free-form error text are the boundaries — see [Error tracking](#error-tracking) |
 | Emails, usernames, or any PII | Ever — emails, tokens, keys, and credentials are redacted out of error text too |
 | Skill arguments, skill markdown, or prompt bodies | `skill_invoked` sends only a closed `skill_id` / `skill_source` / `skill_trigger`. `tool_input.args` and the rest of a slash prompt never leave the machine |
 | Third-party skill names | Collapsed to `skill_id: other` + `skill_source: third_party`. Unknown `/foo` slash tokens emit no event at all |
 
-**One honest exception: error messages.** Since the addition of [error tracking](#error-tracking), redacted error **messages and stack traces** ARE collected (as `$exception` events) — that is a deliberate change from the previous coarse-category-only posture, and it is consent-gated with its own [kill-switch](#how-to-opt-out-four-ways). Raw paths, prompts, project names, source code, and model output are still **never** collected — they are stripped from the error text before it leaves your machine.
+**One honest exception: error messages.** Since the addition of [error tracking](#error-tracking), bounded, redacted error **messages, stacks, and types** ARE collected (as `$exception` events) — that is a deliberate change from the previous coarse-category-only posture, and it is consent-gated with its own [kill-switch](#how-to-opt-out-four-ways). Raw paths, prompts, project names, SDK source-context fields, conditional release/trace/span/chunk identifiers, and model output are still **never** collected — they are stripped from the error text and event before it leaves your machine. Free-form error text cannot support a universal content guarantee; the redaction pipeline and caps above are the actual promise, and their tests are the proof.
 
 Analytics properties are enforced in code: they go through a whitelist (only the fields in the [What is collected](#what-is-collected) table survive), not a blocklist. Every whitelisted field is either a number, a boolean, or a value from a closed set we define — there is no analytics field that could carry free-form user content. Error text is the one free-form path, and it goes through the separate allow-then-redact scrubber instead.
 

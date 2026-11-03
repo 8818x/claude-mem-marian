@@ -57,7 +57,9 @@
 // directive #4): every request is a plain short GET with an AbortSignal
 // timeout.
 
+// Modified by the claude-mem-marian fork: Decision 16 sync error redaction.
 import { logger } from '../../utils/logger.js';
+import { registerScrubValues } from '../../utils/credential-redaction.js';
 import type { SyncApply, SyncOp, UndecodableOp } from './SyncApply.js';
 import {
   assertCanonicalDecimal,
@@ -369,6 +371,10 @@ export class SyncClient {
     this.apply = apply;
     this.hubUrl = hubUrl;
     this.token = options.token ?? '';
+    // Decision 16: the sync token is an exact active credential — supply it to
+    // the logger's bounded in-memory scrub registry so an echoed token can
+    // never persist in a log line, even through a path that embeds remote text.
+    registerScrubValues([this.token]);
     this.userId = options.userId ?? '';
     this.deviceId = options.deviceId;
     this.deviceName = (options.deviceName ?? '').trim().slice(0, 80);
@@ -664,8 +670,10 @@ export class SyncClient {
           }
         );
         if (!res.ok) {
-          const body = (await res.text().catch(() => '')).slice(0, 200);
-          throw new Error(`sync hub pull ${res.status}: ${body}`);
+          // Decision 16: omit the remote response body — untrusted diagnostic
+          // content. Status and operation name are the safe context; the
+          // trailing colon keeps the auth-pause classifier intact.
+          throw new Error(`sync hub pull ${res.status}: (response body withheld)`);
         }
         const page = await res.json() as ChangesPage | null;
         if (!page || page.protocol_version !== 2 || !Array.isArray(page.ops)) {
@@ -876,8 +884,9 @@ export class SyncClient {
       signal: AbortSignal.timeout(this.requestTimeoutMs),
     });
     if (!res.ok) {
-      const body = (await res.text().catch(() => '')).slice(0, 200);
-      throw new RealtimeTokenError(res.status, `sync realtime-token ${res.status}: ${body}`);
+      // Decision 16: omit the remote response body (untrusted diagnostic
+      // content); status is the safe context.
+      throw new RealtimeTokenError(res.status, `sync realtime-token ${res.status}: (response body withheld)`);
     }
     const json = await res.json() as Record<string, unknown> | null;
     const accessToken = json?.access_token;
@@ -894,6 +903,8 @@ export class SyncClient {
     ) {
       throw new Error('sync realtime-token: malformed response');
     }
+    // Decision 16: validated exact credentials for this operation.
+    registerScrubValues([accessToken, apikey]);
     const socketUrl = new URL(realtimeUrl);
     socketUrl.searchParams.set('apikey', apikey);
     socketUrl.searchParams.set('vsn', '1.0.0');

@@ -6,7 +6,7 @@
 Read the [repository guide](docs/marian/reference/repository-guide.md) for folder responsibilities. My Work and Classic Viewer include the four [Catppuccin](https://github.com/catppuccin/catppuccin) themes: Latte, Frappé, Macchiato and Mocha.
 
 <p align="center">
-  <img src="docs/public/marian-edition-logo.png" width="900" alt="claude-mem — Maria(n)-edition">
+  <img src="docs/public/marian-edition-logo-transparent.png" width="900" alt="claude-mem — Maria(n)-edition">
 </p>
 
 # Marian

@@ -86,7 +86,7 @@ export const REQUIREMENTS: Requirement[] = [
   { id: 'R10.1', section: '10', kind: 'process', text: 'Clarity like Basecamp and Patreon; AI SDK Agents patterns as reference.', wireframe: 'AI Elements and the AI SDK Agents patterns are a design reference, not a required kit; Aceternity components sit alongside them.' },
   { id: 'R10.2', section: '10', kind: 'ui', text: 'Subtle drop shadows that give surfaces texture, not one on everything; nothing harsh.' },
   { id: 'R10.3', section: '10', kind: 'ui', text: 'React on a real UI kit, not plain HTML.' },
-  { id: 'R10.4', section: '10', kind: 'ui', text: 'Agent icons on their work; the cmem brain mark is the only logo.' },
+  { id: 'R10.4', section: '10', kind: 'ui', text: 'Agent icons stay on their work; one transparent Marian banner links to the fork repository.' },
   { id: 'R10.5', section: '10', kind: 'ui', text: 'Clean, uncluttered text.' },
 
   // 11. Design state and process

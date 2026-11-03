@@ -14,7 +14,6 @@ import { ActivePill, ClassicViewerLink, DeviceFreshness, GitHubStars, LiveIndica
 import { Navbar, NavBody } from '@/components/aceternity/resizable-navbar'
 import { Notch } from '@/components/aceternity/notch'
 import { StickyBanner } from '@/components/aceternity/sticky-banner'
-import { CmemMark } from '@/components/brand'
 import { FocusChipRow, FocusRail, PastFocusLink, SIDE_NAV_PILL, type FocusSelection } from '@/components/focus-nav'
 import { RequestDetail } from '@/components/request-detail'
 import { cn } from '@/lib/utils'
@@ -221,10 +220,21 @@ function LoadedApp() {
                 <Navbar className="top-0 z-30">
                   <HeaderBody>
                     <Req ids={['R10.4']}>
-                      <span className="flex shrink-0 items-center gap-2">
-                        <CmemMark className="size-8 text-[#D86441]" />
-                        <span className="sr-only md:not-sr-only md:text-[0.95rem] md:font-semibold md:tracking-tight">claude-mem</span>
-                      </span>
+                      <a
+                        href="https://github.com/8818x/claude-mem-marian"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="Open Marian on GitHub"
+                        title="Marian on GitHub"
+                        className="inline-flex shrink-0 items-center transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <img
+                          src="/work-view/marian-edition-logo-transparent.png"
+                          alt=""
+                          aria-hidden="true"
+                          className="h-9 w-auto max-w-[108px] object-contain md:h-10 md:max-w-[120px]"
+                        />
+                      </a>
                     </Req>
                     <h1 className="min-w-0 truncate text-lg font-semibold tracking-tight whitespace-nowrap md:hidden [.header-pill_&]:text-base">{heading}</h1>
                     <div className="ml-auto flex shrink-0 items-center gap-0.5 md:gap-2">

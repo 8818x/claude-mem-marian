@@ -229,7 +229,7 @@ Each of these needs Alex's explicit go; the report shows the honest fallback unt
 
 ## Keeping copies in sync
 
-The plugin directory is the source of truth. `python3 scripts/acr.py sync-check` compares `SKILL.md`, `CHECKSUMS.txt` and `scripts/**` against the house copy (`~/agent-data/workflows/agent-cost-report/`) and the four mirror plugins (`claude-mem-cursor`, `claude-mem-grok-bot`, `cowork`, `openclaw`, each under `skills/agent-cost-report/`) and exits 1 on drift; `--write` copies plugin → destinations and re-checks (G2). `CHECKSUMS.txt` is `sha256sum -c` compatible.
+The plugin directory is the source of truth. `python3 scripts/acr.py sync-check` compares `SKILL.md`, `CHECKSUMS.txt` and runtime files under `scripts/**` against the house copy (`~/agent-data/workflows/agent-cost-report/`) and the four mirror plugins (`claude-mem-cursor`, `claude-mem-grok-bot`, `cowork`, `openclaw`, each under `skills/agent-cost-report/`) and exits 1 on drift; maintainer tests under `scripts/tests/` are excluded from shipping and sync. `--write` copies plugin → destinations and re-checks (G2). `CHECKSUMS.txt` is `sha256sum -c` compatible.
 
 ## Related
 

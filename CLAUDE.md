@@ -6,9 +6,15 @@ Claude-mem is a Claude Code plugin providing persistent memory across sessions. 
 
 ## Build
 
-```bash
-npm run build-and-sync        # Build, sync to marketplace, restart worker
-```
+Use `npm run build` for checkout-local build verification. `npm run dev` runs the same build and does not start a watcher. Build dependency caches stay under `.scratch/build-cache/`.
+
+Run `npm test` and `npm run typecheck` for the test suite and TypeScript checks.
+
+Treat `npm run build-and-sync` as an explicit local integration operation. It builds the plugin, then previews the installed marketplace and cache sync, dependency installs, stale-file removal, and worker restart plan. Add `-- --apply` only when you intend to perform all listed operations. The command builds locally before its sync preview; the build does not touch installed state.
+
+For installed-state operations, `npm run sync-marketplace` previews sync and dependency-install targets. Use `npm run sync-marketplace -- --apply` to apply it. `npm run sync-marketplace:force` previews with the beta-branch guard bypassed; add `-- --apply` to apply. `--force` does not enable writes.
+
+`node scripts/restart-marketplace-worker.cjs` and `npm run worker:restart` preview the validated installed worker target. Add `--apply` to the direct script or `-- --apply` to npm to restart it. The sync command restarts only when both `--restart` and `--apply` are present. These commands are not ordinary build/test verification.
 
 ## File Locations
 

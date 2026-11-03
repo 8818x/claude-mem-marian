@@ -1,7 +1,7 @@
 # sync-hub — Deploy Runbook
 
 Production deployment steps for the two-lane sync hub (plan
-`plans/2026-07-17-phase5-two-lane-sync.md`). Everything below is a
+`docs/upstream/plans/2026-07-17-phase5-two-lane-sync.md`). Everything below is a
 **production-only** action: local Vitest and the canonical matrix E2E need none
 of it. The matrix starts an ephemeral local Miniflare Worker/SQLite Durable
 Object plus loopback-only verifier/projector sidecars.

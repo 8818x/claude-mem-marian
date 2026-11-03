@@ -75,9 +75,11 @@ describe('POST /api/sessions/init: Codex internal helper prompts', () => {
     ];
     store = new SessionStore(new Database(':memory:'));
     const routes = new SessionRoutes(
-      { getSession: () => undefined } as any,
-      { getSessionStore: () => store, getCloudSync: () => null } as any,
-      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      { getSession: () => undefined, initializeSession: () => ({}) } as any,
+      { getSessionStore: () => store, getCloudSync: () => null, getChromaSync: () => null } as any,
+      {} as any, {} as any, {} as any,
+      { broadcastNewPrompt: () => {}, broadcastSessionStarted: () => {} } as any,
+      {} as any, {} as any,
     );
     const app = express();
     app.use(express.json());
@@ -179,9 +181,11 @@ describe('POST /api/sessions/init: grok-bot sub-agent briefs', () => {
     ];
     store = new SessionStore(new Database(':memory:'));
     const routes = new SessionRoutes(
-      { getSession: () => undefined } as any,
-      { getSessionStore: () => store, getCloudSync: () => null } as any,
-      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      { getSession: () => undefined, initializeSession: () => ({}) } as any,
+      { getSessionStore: () => store, getCloudSync: () => null, getChromaSync: () => null } as any,
+      {} as any, {} as any, {} as any,
+      { broadcastNewPrompt: () => {}, broadcastSessionStarted: () => {} } as any,
+      {} as any, {} as any,
     );
     const app = express();
     app.use(express.json());

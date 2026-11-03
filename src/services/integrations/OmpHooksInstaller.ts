@@ -1,22 +1,22 @@
+// Modified by the claude-mem-marian fork: the OMP hook installer is retired; legacy uninstall cleanup and status remain available. Upstream attribution is retained.
+
 import path from 'path';
 import { homedir } from 'os';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'fs';
-import { logger } from '../../utils/logger.js';
-import { MARKETPLACE_ROOT } from '../../shared/paths.js';
+import { existsSync, rmSync } from 'fs';
 
 /**
- * OMP (Oh My Pi) hook installer.
+ * OMP (Oh My Pi) legacy hook cleanup and status.
  *
- * OMP auto-discovers hook modules at `<cwd>/.omp/hooks/pre/*.ts` and
- * `~/.omp/agent/hooks/pre/*.ts` (user-global via getAgentDir(); see oh-my-pi
- * builtin.ts loadHooks / getConfigDirs). Hooks are plain TypeScript modules
- * loaded in-process by OMP's Bun runtime — no build step, no manifest, no
- * shell-command wrapper (unlike Cursor/Windsurf/Antigravity, which exec the
- * worker CLI per event).
+ * The OMP hook installer is retired. No installation path ships or resolves
+ * `omp/hooks/claude-mem.ts` anymore. This module remains for legacy users:
+ * the generic uninstaller (src/npx-cli/commands/uninstall-targets.ts)
+ * detects the user-global pre-hook file and removes exactly that file, and
+ * the status helper reports whether the hook file is present.
  *
- * This installer copies the shipped hook bundle to
- * `~/.omp/agent/hooks/pre/claude-mem.ts`, where OMP loads it for every session
- * regardless of project. Uninstall removes that single file.
+ * The hook target is `<agentDir>/hooks/pre/claude-mem.ts`, where agentDir
+ * honours PI_CODING_AGENT_DIR and defaults to ~/.omp/agent. A missing file
+ * is a successful no-op; cleanup preserves sibling hooks and parent
+ * directories.
  */
 
 const OMP_HOOK_FILENAME = 'claude-mem.ts';
@@ -31,45 +31,6 @@ function ompHooksPreDir(): string {
 
 function ompHookDestination(): string {
   return path.join(ompHooksPreDir(), OMP_HOOK_FILENAME);
-}
-
-/** Trusted locations for the shipped hook. The marketplace root is the
- *  canonical, claude-mem-installed source. A repo/checkout source is honored
- *  only behind an explicit dev opt-in — never by default: process.cwd() could
- *  be an untrusted repository whose omp/hooks/ would then be installed as a
- *  persistent user-global OMP hook (~/.omp/agent/hooks/pre/). (Greptile P1.) */
-export function findOmpHookSourcePath(): string | null {
-  const roots = [MARKETPLACE_ROOT];
-  if (process.env.CLAUDE_MEM_DEV_HOOK_SOURCE === '1') roots.push(process.cwd());
-  for (const root of roots) {
-    const candidate = path.join(root, 'omp', 'hooks', OMP_HOOK_FILENAME);
-    if (existsSync(candidate)) return candidate;
-  }
-  return null;
-}
-
-export async function installOmpHooks(): Promise<number> {
-  const source = findOmpHookSourcePath();
-  if (!source) {
-    console.error('Could not find the OMP hook bundle shipped with claude-mem.');
-    console.error('  Expected at: <marketplace>/omp/hooks/claude-mem.ts');
-    console.error('  Re-run `npx claude-mem install` to populate the marketplace,');
-    console.error('  or set CLAUDE_MEM_DEV_HOOK_SOURCE=1 to resolve from the cwd (dev only).');
-    return 1;
-  }
-
-  try {
-    const destination = ompHookDestination();
-    mkdirSync(ompHooksPreDir(), { recursive: true });
-    writeFileSync(destination, readFileSync(source, 'utf-8'), 'utf-8');
-    console.log(`  OMP hook installed to: ${destination}`);
-    logger.info('OMP', 'Hook installed', { destination });
-    return 0;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`Failed to install OMP hook: ${message}`);
-    return 1;
-  }
 }
 
 export function uninstallOmpHooks(): number {

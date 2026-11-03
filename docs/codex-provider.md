@@ -1,16 +1,22 @@
 # Codex Subscription Provider
 
+> Modified by the Marian fork: installation references use Marian's canonical instructions. Upstream attribution is retained.
+
 Use an existing ChatGPT subscription through a locally installed Codex CLI.
 No OpenAI API key is used, and failures do not fall back to another provider.
 
+Install Marian using [the fork installation instructions](../README.md#install-this-fork).
+For Codex CLI host integration, see [Codex CLI host](../README.md#codex-cli-host).
+Host integration captures activity. Selecting Codex as the observation provider
+is a separate configuration choice.
+
 1. Install Codex CLI and run `codex login` as the user running claude-mem.
-2. Run `npx claude-mem install --provider codex` (optionally add `--model gpt-6-luna`), or select Codex in the viewer, or set `CLAUDE_MEM_PROVIDER` to `codex` in `settings.json`.
+2. Select Codex in the viewer, or set `CLAUDE_MEM_PROVIDER` to `codex` in `settings.json`.
 3. Restart the claude-mem worker.
 
-If `--model` is omitted, the installer keeps any saved Codex model. On a first
-install the model setting is empty, so Codex chooses its default. To return to
-that default after choosing a model, clear the Codex Model field in the viewer
-or set `CLAUDE_MEM_CODEX_MODEL` to an empty string in `settings.json`.
+An empty `CLAUDE_MEM_CODEX_MODEL` setting lets Codex choose its default.
+To return to that default after choosing a model, clear the Codex Model field
+in the viewer or set `CLAUDE_MEM_CODEX_MODEL` to an empty string in `settings.json`.
 
 Optional settings:
 

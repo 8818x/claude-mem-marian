@@ -4,17 +4,19 @@ description: Hermes Agent remembers its work with claude-mem and shares one memo
 icon: feather
 ---
 
+<Warning>
+**Modified by the claude-mem-marian fork:** This inherited guide is retained as a legacy reference. Marian does not support new Hermes Agent installations; the main installer rejects this host before writes. The external Hermes runtime description below is not a promise of active Marian support.
+</Warning>
+
 ## Overview
 
 claude-mem plugs into [Hermes Agent](https://hermes-agent.nousresearch.com) as a memory provider. Hermes records its prompts, tool calls and memory notes in claude-mem, and at the start of each turn it is handed the notes that match the prompt. A Hermes session and a Claude Code session in the same checkout read and write the same project memory.
 
-## Install
+## Legacy installation reference
 
-```bash
-npx claude-mem install --ide hermes
-```
+The upstream installer command `npx claude-mem install --ide hermes` is not supported by Marian and is rejected before installation writes. The remaining sections preserve the inherited integration description for reference.
 
-The installer:
+The upstream installer historically:
 
 1. Copies the provider to `$HERMES_HOME/plugins/claude-mem/`. The default home is `~/.hermes` on macOS and Linux, or `%LOCALAPPDATA%\hermes` on Windows (`%USERPROFILE%\AppData\Local\hermes` if `LOCALAPPDATA` is unset).
 2. Selects it in `$HERMES_HOME/config.yaml`:

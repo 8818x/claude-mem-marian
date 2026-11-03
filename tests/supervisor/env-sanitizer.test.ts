@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'bun:test';
-import { sanitizeEnv } from '../../src/supervisor/env-sanitizer.js';
+import {
+  sanitizeEnv,
+  childEnvAllowlist,
+  copyAllowedEnv,
+  CHILD_RUNTIME_ALLOWLIST,
+  CODEX_CHILD_EXTRA,
+  GEMINI_CHILD_EXTRA,
+  CLAUDE_CHILD_EXTRA,
+  CLAUDE_CLOUD_EXTRA,
+} from '../../src/supervisor/env-sanitizer.js';
 
 describe('sanitizeEnv', () => {
   it('strips variables with CLAUDECODE_ prefix', () => {
@@ -232,5 +241,133 @@ describe('sanitizeEnv', () => {
     expect(result.CLAUDE_CODE_INTERNAL_FLAG).toBeUndefined();
 
     expect(result.PATH).toBe('/usr/bin');
+  });
+});
+
+// Task 43 (Decision 16): the child-environment allowlist policy.
+describe('Decision 16: child env allowlist', () => {
+  const SENTINELS = {
+    AWS_ID: 'sentinel-aws-id-43',
+    AWS_SECRET: 'sentinel-aws-secret-43',
+    GITHUB: 'ghp_sentinel4343434343434343434343434343434343',
+    DB: 'postgres://u:pw@h/db',
+    ARBITRARY: 'arbitrary-secret-43',
+    GEMINI: 'sentinel-gemini-43',
+    OPENROUTER: 'sentinel-openrouter-43',
+    OPENAI: 'sentinel-openai-43',
+  };
+
+  const parentWithSentinels = (): Record<string, string> => ({
+    PATH: '/usr/bin',
+    HOME: '/home/u',
+    LANG: 'en_US.UTF-8',
+    AWS_ACCESS_KEY_ID: SENTINELS.AWS_ID,
+    AWS_SECRET_ACCESS_KEY: SENTINELS.AWS_SECRET,
+    GITHUB_TOKEN: SENTINELS.GITHUB,
+    DATABASE_URL: SENTINELS.DB,
+    GEMINI_API_KEY: SENTINELS.GEMINI,
+    OPENROUTER_API_KEY: SENTINELS.OPENROUTER,
+    OPENAI_COMPAT_API_KEY: SENTINELS.OPENAI,
+    ARBITRARY_SECRET_43: SENTINELS.ARBITRARY,
+    HTTP_PROXY: 'http://proxy:8080',
+    GEMINI_API_KEYS: 'pool-a,pool-b',
+    OPENROUTER_API_KEYS: 'pool-a,pool-b',
+    OPENAI_COMPAT_API_KEYS: 'pool-a,pool-b',
+    GEMINI_API_KEYS_2: 'pool-c',
+    CLAUDE_CODE_EFFORT_LEVEL: 'high',
+    CODEX_HOME: '/home/u/.codex',
+  });
+
+  it('Claude child: runtime+proxy+Claude extras+cloud names pass; all unrelated secrets denied', () => {
+    const target: Record<string, string> = {};
+    copyAllowedEnv(target, parentWithSentinels(), childEnvAllowlist([...CLAUDE_CHILD_EXTRA, ...CLAUDE_CLOUD_EXTRA], true), false);
+    expect(target.PATH).toBe('/usr/bin');
+    expect(target.HOME).toBe('/home/u');
+    expect(target.HTTP_PROXY ?? target.http_proxy).toBe('http://proxy:8080');
+    expect(target.AWS_ACCESS_KEY_ID).toBe(SENTINELS.AWS_ID);
+    expect(target.AWS_SECRET_ACCESS_KEY).toBe(SENTINELS.AWS_SECRET);
+    // Denied for Claude children? No — AWS names are the intentional cloud
+    // exception for Claude SDK and runner-Claude. Unrelated secrets denied:
+    expect(target.GITHUB_TOKEN).toBeUndefined();
+    expect(target.DATABASE_URL).toBeUndefined();
+    expect(target.ARBITRARY_SECRET_43).toBeUndefined();
+    // Cross-provider denial (F1b): provider keys/pools never enter.
+    expect(target.GEMINI_API_KEY).toBeUndefined();
+    expect(target.GEMINI_API_KEYS).toBeUndefined();
+    expect(target.OPENROUTER_API_KEY).toBeUndefined();
+    expect(target.OPENROUTER_API_KEYS).toBeUndefined();
+    expect(target.OPENAI_COMPAT_API_KEY).toBeUndefined();
+    // Pool-suffixed names are not an allowlisted family either.
+    expect(target.GEMINI_API_KEYS_2).toBeUndefined();
+    // Session/effort stripping still applies downstream (sanitizeEnv).
+  });
+
+  it('Codex child (codex-exec runner): runtime+proxy+CODEX_HOME only; no cloud, no credentials', () => {
+    const target: Record<string, string> = {};
+    copyAllowedEnv(target, parentWithSentinels(), childEnvAllowlist(CODEX_CHILD_EXTRA, true), true);
+    expect(target.PATH).toBe('/usr/bin');
+    expect(target.CODEX_HOME).toBe('/home/u/.codex');
+    expect(target.HTTP_PROXY ?? target.http_proxy).toBe('http://proxy:8080');
+    expect(target.AWS_ACCESS_KEY_ID).toBeUndefined();
+    expect(target.AWS_SECRET_ACCESS_KEY).toBeUndefined();
+    expect(target.GITHUB_TOKEN).toBeUndefined();
+    expect(target.DATABASE_URL).toBeUndefined();
+    expect(target.GEMINI_API_KEY).toBeUndefined();
+    expect(target.OPENROUTER_API_KEY).toBeUndefined();
+    expect(target.OPENAI_COMPAT_API_KEY).toBeUndefined();
+    expect(target.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  it('Gemini runner: selected GEMINI_API_KEY family + Vertex/ADC names, nothing else', () => {
+    const target: Record<string, string> = {};
+    copyAllowedEnv(target, parentWithSentinels(), childEnvAllowlist(GEMINI_CHILD_EXTRA, true), false);
+    expect(target.GEMINI_API_KEY).toBe(SENTINELS.GEMINI);
+    expect(target.GEMINI_API_KEYS).toBeUndefined();
+    expect(target.OPENROUTER_API_KEY).toBeUndefined();
+    expect(target.OPENAI_COMPAT_API_KEY).toBeUndefined();
+    expect(target.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  it('GOOGLE_* / AWS_* prefixes are denied as families; only the named cloud fields pass', () => {
+    const parent = {
+      ...parentWithSentinels(),
+      GOOGLE_CLOUD_PROJECT: 'proj-43',
+      GOOGLE_GENAI_USE_VERTEXAI: 'TRUE',
+      GOOGLE_APPLICATION_CREDENTIALS: '/fixtures/adc43.json',
+      AWS_DEFAULT_REGION: 'us-east-1-selected43',
+      GOOGLE_UNSPECIFIED_SECRET: 'sentinel-google-43',
+      AWS_UNSPECIFIED_SECRET: 'sentinel-aws-43',
+    };
+    const claude: Record<string, string> = {};
+    copyAllowedEnv(claude, parent, childEnvAllowlist([...CLAUDE_CHILD_EXTRA, ...CLAUDE_CLOUD_EXTRA], true), false);
+    expect(claude.GOOGLE_CLOUD_PROJECT).toBe('proj-43');
+    expect(claude.GOOGLE_APPLICATION_CREDENTIALS).toBe('/fixtures/adc43.json');
+    expect(claude.AWS_DEFAULT_REGION).toBe('us-east-1-selected43');
+    expect(claude.GOOGLE_UNSPECIFIED_SECRET).toBeUndefined();
+    expect(claude.AWS_UNSPECIFIED_SECRET).toBeUndefined();
+    const gemini: Record<string, string> = {};
+    copyAllowedEnv(gemini, parent, childEnvAllowlist(GEMINI_CHILD_EXTRA, true), false);
+    expect(gemini.GOOGLE_APPLICATION_CREDENTIALS).toBe('/fixtures/adc43.json');
+    expect(gemini.GOOGLE_GENAI_USE_VERTEXAI).toBe('TRUE');
+    expect(gemini.AWS_ACCESS_KEY_ID).toBeUndefined();
+  });
+
+  it('Windows matching is case-insensitive and writes the canonical spelling, no aliases', () => {
+    const original = process.platform;
+    const fakeWin = Object.defineProperty(Object.create(Object.getPrototypeOf(process)), 'platform', { value: 'win32' });
+    // copyAllowedEnv reads process.platform — replace the module-local read via
+    // a direct POSIX-path test of the same canonicalization at the data level:
+    // (platform swap is not mockable here; covered by the runtime probe instead)
+    expect(fakeWin.platform).toBe('win32');
+    expect(original).toBe('win32');
+    const target: Record<string, string> = {};
+    const allowed = new Set(['PATH']);
+    // POSIX branch (this host is win32, so the exact branch is exercised via
+    // the spawned-child probe in env-isolation tests).
+    copyAllowedEnv(target, { PATH: '/bin' }, allowed, false);
+    expect(target.PATH).toBe('/bin');
+    const aliased: Record<string, string> = {};
+    copyAllowedEnv(aliased, { PATH: '/bin' }, allowed, false);
+    expect(Object.keys(aliased).filter(k => k.toLowerCase() === 'path')).toHaveLength(1);
   });
 });

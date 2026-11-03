@@ -454,18 +454,27 @@ export function removeLegacyCodexMcpSearchConfig(content: string): string {
 
 function writeCodexPluginConfig(enabled: boolean, configPath = CODEX_CONFIG_PATH): boolean {
   if (!enabled && !existsSync(configPath)) return false;
-  mkdirSync(path.dirname(configPath), { recursive: true });
   const current = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : '';
   let next = current;
 
   if (enabled) {
+    mkdirSync(path.dirname(configPath), { recursive: true });
     next = setTomlFeatureEnabled(next, 'hooks', true);
     next = removeLegacyCodexMcpSearchConfig(next);
+    for (const legacyPluginId of LEGACY_CODEX_PLUGIN_IDS) {
+      next = setTomlPluginEnabled(next, legacyPluginId, false);
+    }
+    next = setTomlPluginEnabled(next, CODEX_PLUGIN_ID, true);
+  } else {
+    const pluginIds = [...LEGACY_CODEX_PLUGIN_IDS, CODEX_PLUGIN_ID];
+    const structuralLines = tomlStructuralLines(current.split('\n'));
+    for (const pluginId of pluginIds) {
+      const table = `plugins.${pluginId}`;
+      if (structuralLines.some(line => normalizeTomlHeader(line) === table)) {
+        next = setTomlPluginEnabled(next, pluginId, false);
+      }
+    }
   }
-  for (const legacyPluginId of LEGACY_CODEX_PLUGIN_IDS) {
-    next = setTomlPluginEnabled(next, legacyPluginId, false);
-  }
-  next = setTomlPluginEnabled(next, CODEX_PLUGIN_ID, enabled);
 
   if (next === current) return false;
   writeFileSync(configPath, next);
@@ -716,13 +725,18 @@ export function verifyCodexPluginLoaded(spawn: CodexSpawn = codexSpawn): boolean
   return true;
 }
 
-export function uninstallCodexCli(): number {
+export function uninstallCodexCli(options: { removeMarketplace?: boolean } = {}): number {
   console.log('\nUninstalling Claude-Mem Codex CLI integration...\n');
 
   let failed = false;
 
   try {
-    disableCodexPluginConfig();
+    const current = existsSync(CODEX_CONFIG_PATH) ? readFileSync(CODEX_CONFIG_PATH, 'utf-8') : '';
+    if (current.includes(CODEX_PLUGIN_ID) || LEGACY_CODEX_PLUGIN_IDS.some(id => current.includes(id))) {
+      disableCodexPluginConfig();
+    } else {
+      console.log('  No Claude-Mem plugin entry in Codex config; leaving the file unchanged.');
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`\nCodex plugin config update failed: ${message}`);
@@ -730,10 +744,12 @@ export function uninstallCodexCli(): number {
   }
 
   try {
-    if (commandExists(resolveCodexCommand())) {
+    if (options.removeMarketplace !== false && commandExists(resolveCodexCommand())) {
       runCodex(['plugin', 'marketplace', 'remove', MARKETPLACE_NAME]);
-    } else {
+    } else if (options.removeMarketplace !== false) {
       console.log('  Codex CLI not found; skipping marketplace removal.');
+    } else {
+      console.log(`  Marketplace ${MARKETPLACE_NAME} is not registered; leaving Codex marketplaces unchanged.`);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

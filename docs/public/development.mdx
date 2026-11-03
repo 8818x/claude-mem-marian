@@ -5,6 +5,8 @@ description: "Build from source, run tests, and contribute to Claude-Mem"
 
 # Development Guide
 
+> **Modified by the claude-mem-marian fork:** The upstream npm release instructions are replaced by Marian's source and GitHub Release policy. Upstream attribution is retained.
+
 ## Building from Source
 
 ### Prerequisites
@@ -622,58 +624,13 @@ echo '{"session_id":"test-123","cwd":"'$(pwd)'","prompt":"test"}' | node plugin/
 
 ## Publishing
 
-Releases ship from `main` only, and pull requests target `main`.
+Marian distributes source through its GitHub repository and `Maria-N` GitHub Releases. A GitHub Release does not publish this fork to a plugin marketplace or npm.
 
-### Version Bump
-
-Update every manifest that carries the package version:
-
-- `package.json`
-- `plugin/package.json`
-- `.claude-plugin/marketplace.json`
-- `.claude-plugin/plugin.json`
-- `plugin/.claude-plugin/plugin.json`
-- `.codex-plugin/plugin.json`
-- `plugin/.codex-plugin/plugin.json`
-- `openclaw/openclaw.plugin.json`
-
-Verify the old version is gone and the new version appears everywhere expected:
-
-```bash
-git grep -n '"version": "NEW_VERSION"'
-git grep -n '"version": "OLD_VERSION"'
+```text
+commit → Maria-N tag → push → GitHub Release → stop
 ```
 
-### Build, Tag, and Publish
-
-```bash
-npm run build-and-sync
-git add -A
-git commit -m "chore: bump version to NEW_VERSION"
-git tag -a vNEW_VERSION -m "Version NEW_VERSION"
-git push origin main
-git push origin vNEW_VERSION
-```
-
-Publishing to npm requires the maintainer's npm credentials and 2FA:
-
-```bash
-npm publish
-npm view claude-mem@NEW_VERSION version
-```
-
-Only after npm resolves the version, create the GitHub release and regenerate the
-changelog:
-
-```bash
-gh release create vNEW_VERSION --title "vNEW_VERSION" --notes "..."
-npm run changelog:generate
-git add CHANGELOG.md
-git commit -m "docs: regenerate changelog for vNEW_VERSION"
-git push origin main
-```
-
-Do not hand-edit `CHANGELOG.md`; it is generated from GitHub releases.
+Public Claude/Codex marketplace submissions and listing sync are prohibited. The marketplace manifests and `plugin/` remain for local marketplace registration and plugin installation only. npm publication is prohibited; `package.json` marks this fork private and the npm publish workflow is disabled.
 
 ## Contributing
 

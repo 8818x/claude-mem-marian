@@ -533,6 +533,45 @@ describe('GeminiProvider', () => {
     }
   });
 
+  it('Task 43: the thinking-retry rejected body excerpt is scrubbed before its display limit', async () => {
+    const GEMINI_SENTINEL = 't43-gemini-sentinel-43';
+    const loggerMod = await import('../src/utils/logger.js');
+    const errorLog: Array<[string, unknown, unknown]> = [];
+    const errorSpy = spyOn(loggerMod.logger, 'error').mockImplementation(
+      ((component: unknown, message: unknown, ctx: unknown, data: unknown) => {
+        errorLog.push([String(component), message, ctx]);
+      }) as never,
+    );
+    const responses = [
+      // First send: thinking consumed the output budget (empty MAX_TOKENS reply).
+      () => new Response(JSON.stringify({
+        candidates: [{ finishReason: 'MAX_TOKENS' }],
+        usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 0, totalTokenCount: 1 },
+      })),
+      // The thinking-off retry is rejected, echoing a credential sentinel.
+      () => new Response(`{"error":{"message":"rejected while holding token=${GEMINI_SENTINEL}"}}`, { status: 400 }),
+    ];
+    global.fetch = mock(() => {
+      const next = responses.shift() ?? responses[responses.length - 1];
+      return Promise.resolve(next());
+    });
+    const session = makeSession();
+    try {
+      // An empty reply stores no observations; startSession resolves either way.
+      await agent.startSession(session);
+    } finally {
+      errorSpy.mockRestore();
+    }
+    const bodyEntry = errorLog.find(([, , ctx]) =>
+      ctx && typeof ctx === 'object' && 'body' in (ctx as Record<string, unknown>));
+    expect(bodyEntry).toBeDefined();
+    const loggedBody = String((bodyEntry![2] as Record<string, unknown>).body);
+    expect(loggedBody.length).toBeGreaterThan(0);
+    expect(loggedBody.length).toBeLessThanOrEqual(300);
+    expect(loggedBody).not.toContain(GEMINI_SENTINEL);
+    expect(loggedBody).toContain('token='); // safe shape kept for diagnostics
+  });
+
   it('redacts non-400 Gemini response body from thrown message and cause', async () => {
     const rawBody = 'RAW_PROVIDER_BODY with credential sk-secret';
     const session = {

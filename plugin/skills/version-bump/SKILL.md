@@ -1,102 +1,91 @@
 ---
 name: version-bump
-description: Automated semantic versioning and release workflow for Claude Code plugins. Handles version increments across package.json, marketplace.json, plugin.json manifests, build verification, git tagging, GitHub releases, and changelog generation. npm publishing is done by the tag-triggered GitHub Actions workflow through npm trusted publishing.
+description: Verify and keep every Marian fork version field aligned to the canonical source package.json. Plain X.Y.Z semver only; Maria-N fork patch tags; this is an alignment workflow, never a release or publish workflow.
 ---
 
-# Version Bump & Release Workflow
+# Version alignment (Marian fork)
 
-**IMPORTANT:** Plan and write detailed release notes before starting.
+> **Modified by the claude-mem-marian fork:** rewritten from the upstream release/publish workflow to the fork's version-alignment contract (Decision 13). Upstream attribution is retained.
 
-**CRITICAL:** Commit EVERYTHING (including build artifacts). At the end of this workflow, NOTHING should be left uncommitted or unpushed. Run `git status` at the end to verify.
+Keep the fork's version fields aligned to the canonical source. This is an alignment
+workflow. It does not release, publish, or tag. Governing decision:
+`tasks/decisions/decision-13-fork-version-and-plugin-identity-contract.md`.
 
-## Preparation
+## Contract
 
-1.  **Analyze**: Determine if the change is **PATCH** (bug fixes), **MINOR** (features), or **MAJOR** (breaking).
-2.  **Environment**: Identify repository owner/name from `git remote -v`.
-3.  **Paths — every file that carries the version string**:
-    - `package.json` — **the npm/npx-published version** (`npx claude-mem@X.Y.Z` resolves from this)
-    - `plugin/package.json` — bundled plugin runtime deps
-    - `.claude-plugin/marketplace.json` — version inside `plugins[0].version`
-    - `.claude-plugin/plugin.json` — top-level Claude-plugin manifest
-    - `plugin/.claude-plugin/plugin.json` — bundled Claude-plugin manifest
-    - `.codex-plugin/plugin.json` — Codex-plugin manifest
-    - `plugin/.codex-plugin/plugin.json` — bundled Codex-plugin manifest
-    - `.qoder-plugin/plugin.json` — Qoder plugin manifest
-    - `plugin/.qoder-plugin/plugin.json` — bundled Qoder plugin manifest
-    - `openclaw/openclaw.plugin.json` — OpenClaw plugin manifest
-    - `.grok-plugin/plugin.json` — Grok plugin manifest
-    - `claude-mem-cursor/.cursor-plugin/plugin.json` — Cursor plugin manifest
-    - `claude-mem-grok-bot/.cursor-plugin/plugin.json` — Grok Bot Cursor plugin manifest
-    - `dsh/package.json` — bundled DSH plugin package
-    - `README.md` — the version badge (`version-X.Y.Z-green`), not a `"version"` key
+- Canonical version: root `package.json#version` (currently `15.5.0`, upstream baseline v15.5.0).
+  Plain semver `X.Y.Z` only. No prerelease or build-metadata suffixes.
+- Synchronization is one-way at build step 1. `npm run build` runs
+  `scripts/sync-plugin-manifests.js`, which propagates name, version, description,
+  homepage, repository, license, keywords, and author from `package.json` into the four
+  Claude/Codex manifests and the `claude-mem` entry of `.claude-plugin/marketplace.json`.
+  The `bugs` field is not propagated and the sync script must not be extended.
+- Version-bearing shipped manifests: the five `plugin.json`/`package.json` manifests in
+  the npm `files` list plus the maintained marketplace entry. The consistency test
+  `tests/infrastructure/version-consistency.test.ts` enforces `/^\d+\.\d+\.\d+$/` and
+  manifest equality, including `plugin/package.json`.
+- Never hand-edit a generated manifest. The next build overwrites it. Change
+  `package.json` first, then run the build.
 
-    Verify coverage before editing: `git grep -l "\"version\": \"<OLD>\""` should list the fourteen JSON files above, and `git grep -n "version-<OLD>-green"` the README badge. If a new manifest has been added since this doc was last updated, update this list.
+## Alignment procedure
 
-## Workflow
+1. Read `package.json#version`.
+2. Check every version-bearing field matches it:
+   ```bash
+   V=$(node -p "require('./package.json').version")
+   git grep -n "\"version\": \"$V\"" -- package.json plugin/package.json \
+     .claude-plugin/plugin.json .codex-plugin/plugin.json \
+     plugin/.claude-plugin/plugin.json plugin/.codex-plugin/plugin.json
+   grep -n "\"version\": \"$V\"" .claude-plugin/marketplace.json
+   ```
+   Six JSON hits plus one marketplace hit is aligned. A miss means drift, and the fix
+   depends on which copy drifted. For the four generated manifests or the marketplace
+   entry: change `package.json` (the canonical file) and rebuild, never the copies. For
+   `plugin/package.json`, which is hand-maintained and outside the sync's target list:
+   edit that file directly to match the canonical version. Never change the canonical
+   version to match a drifted copy.
+3. Run the consistency tests:
+   ```bash
+   bun test tests/infrastructure/version-consistency.test.ts \
+     tests/scripts/sync-plugin-manifests.test.ts tests/plugin-version-check.test.ts
+   ```
+4. Build checkout-local to prove the sync: `npm run build`. If a Windows
+   "user-mapped section open" error hits a `plugin/scripts/*.cjs` output, it is the
+   documented transient file-lock class: retry the build once. Do not stop or restart
+   any worker.
+5. When the shipped version must be proven, pack into a disposable directory and never
+   publish:
+   ```bash
+   npm pack --ignore-scripts --pack-destination "$TEMP/some-new-dir"
+   ```
+   The tarball name carries the version; extract and check the shipped manifest
+   versions and the marketplace entry.
+6. A numeric version bump requires a new explicit decision. This skill must not choose
+   one. If drift needs a bump to resolve, stop and record the blocker.
 
-1.  **Update**: Increment the version string in every path above. Do NOT touch `CHANGELOG.md` — it's regenerated.
-2.  **Verify**: `git grep -n "\"version\": \"<NEW>\""` — confirm all fourteen JSON files match, and the README badge reads `version-<NEW>-green`. `git grep -n "\"version\": \"<OLD>\""` — should return zero hits.
-3.  **Build and sync**: `npm run build-and-sync` to regenerate artifacts, sync the local marketplace copy, restart the worker, and clear the queue. Do not use plain `npm run build` for release validation because it can leave the local marketplace/worker out of sync.
-4.  **Commit**: `git add -A && git commit -m "chore: bump version to X.Y.Z"`.
-5.  **Tag**: `git tag -a vX.Y.Z -m "Version X.Y.Z"`.
-6.  **Push**: `git push origin main && git push origin vX.Y.Z`.
-7.  **GitHub release**: `gh release create vX.Y.Z --title "vX.Y.Z" --notes "RELEASE_NOTES"`.
-8.  **Changelog**: Regenerate via the project's changelog script:
-    ```bash
-    npm run changelog:generate
-    ```
-    (Runs `node scripts/generate-changelog.js`, which pulls releases from the GitHub API and rewrites `CHANGELOG.md`.)
-9.  **Sync changelog**: Commit and push the updated `CHANGELOG.md`.
-10. **Pre-publish audit**: Verify the release commit, tag, GitHub release, and
-    changelog are pushed, and the release worktree has no pending tracked changes.
-11. **Publish to npm — the workflow does it.** Pushing the `vX.Y.Z` tag triggers
-    `.github/workflows/npm-publish.yml`, which builds, runs the clean-room smoke
-    and publishes through npm trusted publishing (GitHub OIDC), so it needs no
-    npm token. Watch the run:
-    ```bash
-    gh run list --workflow npm-publish.yml --branch vX.Y.Z   # tag runs report the tag as their branch
-    gh run watch <run-id> --exit-status
-    ```
-    **Do not run `npm publish` locally**, even if a local npm login works: the
-    workflow is the only publish path, and only it attaches provenance.
-    If the run fails, read the failing step with `gh run view <run-id> --log-failed`.
-    A transient failure (network, registry outage) is re-run with
-    `gh run rerun <run-id>`; a re-run builds the same tagged commit, so a fix in
-    the code or workflow ships through a PR and the next patch release instead.
-    Never move or recreate a pushed tag.
-    The trusted publisher lives on npmjs.com → `claude-mem` → Settings →
-    Trusted Publisher (GitHub Actions, `thedotmack/claude-mem`, `npm-publish.yml`,
-    `npm publish` allowed). Renaming the workflow file breaks publishing until
-    that entry is updated; changing it requires the maintainer's security key.
-12. **Post-publish verification and notification**: After publishing, verify
-    both the exact version and the latest dist-tag:
-    ```bash
-    npm view claude-mem@X.Y.Z version
-    npm view claude-mem dist-tags.latest
-    npm view claude-mem@X.Y.Z dist.attestations --json   # provenance from the workflow
-    ```
-    Then post the release to X, only after npm verification:
-    - Generate one image about the release with an available image-generation
-      tool, drawn from the release notes.
-    - In a browser that is already logged in to X (for example Claude in
-      Chrome), open x.com and check the active account is `@Claude_Memory`.
-      If no browser is logged in, or the account is a different one, skip the
-      post and say so in the release report. Never sign in or switch accounts.
-    - Post a short summary of the release with the version, the GitHub release
-      URL and the image attached, then report the post's URL.
-13. **Finalize**: `git status` — working tree must be clean and everything must
-    be pushed.
+## Prohibited actions
+
+The Marian fork never performs these, and this skill must never instruct them:
+
+- `npm run release`, `release:patch`, `release:minor`, `release:major` (these run `np`,
+  which publishes to the npm package `claude-mem`, which belongs to upstream).
+- Direct `npm publish`, and any rerun of the publish workflow.
+- Any `v*` tag creation or push. Every `v*` tag push triggers
+  `.github/workflows/npm-publish.yml`, retained upstream automation that attempts an
+  npm publish. Fencing it here does not disable the workflow.
+- `gh release create`, and any push, merge, or deploy as part of a release.
+- `npm run build-and-sync -- --apply`, `npm run sync-marketplace -- --apply`, and
+  worker restarts with `--apply`. These are explicit-intent local integration
+  operations, not build verification.
+- Manufacturing version semantics unsupported by actual tooling.
+
+Fork tags, when a separately authorized release process exists, are `Maria-N` only.
 
 ## Checklist
 
-- [ ] All fifteen version files (fourteen JSON manifests and the README badge) have matching versions
-- [ ] `git grep` for old version returns zero hits
-- [ ] `npm run build-and-sync` succeeded
-- [ ] Git tag created and pushed
-- [ ] GitHub release created with notes
-- [ ] `CHANGELOG.md` updated and pushed
-- [ ] Pre-publish audit passed
-- [ ] `Publish to npm` workflow run for the tag succeeded (no local `npm publish`)
-- [ ] Exact npm version and `latest` both verified after publishing
-- [ ] Release posted to X as `@Claude_Memory` with a generated image after npm verification (or skipped because no browser was logged in as that account)
-- [ ] `git status` shows clean tree
+- [ ] `package.json#version` is plain `X.Y.Z` and equals the approved value.
+- [ ] All six JSON fields plus the marketplace entry match the canonical version.
+- [ ] `npm run build` succeeds checkout-local and the manifests are byte-stable.
+- [ ] Consistency tests pass.
+- [ ] No `v*` tag exists locally (`git tag -l 'v*'` returns nothing).
+- [ ] Nothing was published, released, tagged, pushed, or merged by this workflow.

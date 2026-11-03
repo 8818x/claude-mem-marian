@@ -5,7 +5,7 @@ import { logger } from '../utils/logger.js';
 
 /**
  * Cross-launcher spawn lockfile (Phase 4 of
- * plans/2026-06-10-worker-restart-single-source-of-truth.md).
+ * docs/upstream/plans/2026-06-10-worker-restart-single-source-of-truth.md).
  *
  * Three independent launchers can try to start the worker at the same time —
  * hooks (src/shared/worker-utils.ts), the MCP server

@@ -69,7 +69,6 @@ let bootstrapCalls = 0;
 let keyPersistenceCalls = 0;
 let taskBoundaryCalls = 0;
 let runtimeTaskCalls = 0;
-let integrationCalls = 0;
 let httpCalls = 0;
 const lines: string[] = [];
 // Keep source-vs-bundle version lookup from masking the provider getter path.
@@ -104,12 +103,6 @@ mock.module('../../src/services/hooks/server-bootstrap.js', () => ({
   revokeServerApiKey: async () => { throw new Error('Unexpected server-key revocation'); },
   persistServerSettings: () => { keyPersistenceCalls++; return true; },
 }));
-mock.module('../../src/services/integrations/PiInstaller.js', () => ({
-  installPiExtension: () => { integrationCalls++; throw new Error('Unexpected Pi install'); },
-}));
-mock.module('../../src/services/integrations/DeepSeekHarnessInstaller.js', () => ({
-  installDeepSeekHarness: async () => { integrationCalls++; throw new Error('Unexpected DSH install'); },
-}));
 const http = spyOn(globalThis, 'fetch').mockImplementation(async () => {
   httpCalls++;
   throw new Error('Unexpected HTTP from non-TTY boundary test');
@@ -140,7 +133,7 @@ beforeEach(() => {
   loadSettings.mockClear(); exit.mockClear(); http.mockClear();
   stderr.mockClear(); stdout.mockClear(); lines.length = 0;
   bootstrapCalls = 0; keyPersistenceCalls = 0; taskBoundaryCalls = 0;
-  runtimeTaskCalls = 0; integrationCalls = 0; httpCalls = 0;
+  runtimeTaskCalls = 0; httpCalls = 0;
 });
 afterAll(() => {
   loadSettings.mockRestore(); exit.mockRestore(); http.mockRestore();
@@ -181,7 +174,7 @@ describe('non-TTY public installer refusal before personal provider getters', ()
           expect(statSync(settingsPath).mode & 0o7777).toBe(provisionedMode);
           expect(bootstrapCalls).toBe(0); expect(keyPersistenceCalls).toBe(0);
           expect(taskBoundaryCalls).toBe(0); expect(runtimeTaskCalls).toBe(0);
-          expect(integrationCalls).toBe(0); expect(httpCalls).toBe(0);
+          expect(httpCalls).toBe(0);
           expect(http).not.toHaveBeenCalled();
         });
       }

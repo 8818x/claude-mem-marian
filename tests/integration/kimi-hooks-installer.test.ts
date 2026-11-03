@@ -3,16 +3,19 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import {
-  buildKimiHooksBlock,
   checkKimiHooksStatus,
-  configureKimiMcp,
-  installKimiHooks,
+  handleKimiCommand,
   KIMI_MARKER_BEGIN,
   KIMI_MARKER_END,
   removeManagedBlock,
   uninstallKimiHooks,
-  upsertManagedBlock,
 } from '../../src/services/integrations/KimiHooksInstaller.js';
+
+// Decision 09: Kimi installation is retired. Coverage keeps the approved
+// cleanup/diagnostics contracts (marker seams, selective MCP removal, failure
+// ordering, backup preservation, status labels, install/setup refusal) with
+// legacy TOML/MCP/backup fixtures seeded directly.
+const BLOCK = `${KIMI_MARKER_BEGIN}\n[[hooks]]\nevent = "Stop"\ncommand = 'x'\n${KIMI_MARKER_END}`;
 
 const ORIGINAL_HOME = process.env.KIMI_CODE_HOME;
 let scratch: string | undefined;
@@ -25,136 +28,159 @@ afterEach(() => {
 });
 
 function makeScratchHome(): string {
-  scratch = path.join(tmpdir(), `kimi-install-test-${process.pid}-${Date.now()}`);
+  scratch = path.join(tmpdir(), `kimi-cleanup-test-${process.pid}-${Date.now()}`);
   mkdirSync(scratch, { recursive: true });
   process.env.KIMI_CODE_HOME = scratch;
   return scratch;
 }
 
-describe('managed block merge', () => {
-  const block = `${KIMI_MARKER_BEGIN}\n[[hooks]]\nevent = "Stop"\ncommand = 'x'\n${KIMI_MARKER_END}`;
-
-  test('appends to empty config', () => {
-    expect(upsertManagedBlock('', block)).toBe(`${block}\n`);
-  });
-
-  test('replaces an existing managed block, preserving user content', () => {
-    const user = 'default_model = "kimi-code/k3"\n';
-    const once = upsertManagedBlock(user, block);
-    const twice = upsertManagedBlock(once, block.replace('"Stop"', '"PreCompact"'));
-    expect(twice).toContain('default_model');
-    expect(twice).toContain('"PreCompact"');
-    expect(twice).not.toContain('"Stop"');
-    expect(twice.split(KIMI_MARKER_BEGIN)).toHaveLength(2);
-  });
-
-  test('removeManagedBlock strips exactly the block', () => {
-    const merged = upsertManagedBlock('default_model = "kimi-code/k3"\n', block);
+describe('removeManagedBlock seams', () => {
+  test('strips exactly the managed block and keeps user content', () => {
+    const merged = `default_model = "kimi-code/k3"\n\n${BLOCK}\n`;
     const restored = removeManagedBlock(merged);
     expect(restored).not.toContain(KIMI_MARKER_BEGIN);
     expect(restored).toContain('default_model');
   });
 
-  test('removeManagedBlock only collapses blank lines at the seam', () => {
-    const user = 'a = 1\n\n\n\nb = 2\n';
-    const merged = upsertManagedBlock(user, block);
+  test('only collapses blank lines at the seam', () => {
+    const merged = `a = 1\n\n\n\nb = 2\n\n${BLOCK}\n`;
     const restored = removeManagedBlock(merged);
     expect(restored).not.toContain(KIMI_MARKER_BEGIN);
     // Unrelated triple blank lines in user content must stay untouched.
     expect(restored).toContain('a = 1\n\n\n\nb = 2');
-    // The seam at the end should leave exactly one terminating newline.
-    expect(restored).toMatch(/b = 2\n$/);
   });
 
-  test('removeManagedBlock leaves at most one blank line at the join', () => {
-    const merged = `a = 1\n\n\n${block}\n\n\nb = 2\n`;
+  test('leaves at most one blank line at the join', () => {
+    const merged = `a = 1\n\n\n${BLOCK}\n\n\nb = 2\n`;
     const restored = removeManagedBlock(merged);
-    expect(restored).not.toContain(KIMI_MARKER_BEGIN);
     expect(restored).toBe('a = 1\n\nb = 2\n');
   });
 });
 
-describe('installKimiHooks', () => {
-  test('writes the managed block, backs up config, is idempotent', () => {
+describe('uninstallKimiHooks', () => {
+  test('removes the managed block and keeps user TOML', () => {
     const home = makeScratchHome();
-    writeFileSync(path.join(home, 'config.toml'), 'default_model = "kimi-code/k3"\n');
-    expect(installKimiHooks()).toBe(0);
-    const config = readFileSync(path.join(home, 'config.toml'), 'utf-8');
-    expect(config).toContain(KIMI_MARKER_BEGIN);
-    expect(config).toContain('hook kimi session-init-context');
-    expect(config).toContain('hook kimi observation');
-    expect(config).toContain('hook kimi summarize');
-    expect(config).toContain('default_model'); // user content preserved
-    // second run: no duplicate block
-    expect(installKimiHooks()).toBe(0);
-    const again = readFileSync(path.join(home, 'config.toml'), 'utf-8');
-    expect(again.split(KIMI_MARKER_BEGIN)).toHaveLength(2);
-  });
+    const configPath = path.join(home, 'config.toml');
+    writeFileSync(configPath, `default_model = "kimi-code/k3"\n\n${BLOCK}\n`);
 
-  test('status reports installed state; uninstall removes the block', () => {
-    const home = makeScratchHome();
-    expect(checkKimiHooksStatus()).toBe(1); // not installed
-    expect(installKimiHooks()).toBe(0);
-    expect(checkKimiHooksStatus()).toBe(0);
     expect(uninstallKimiHooks()).toBe(0);
-    expect(checkKimiHooksStatus()).toBe(1);
-    expect(readFileSync(path.join(home, 'config.toml'), 'utf-8')).not.toContain(KIMI_MARKER_BEGIN);
-  });
-});
 
-describe('configureKimiMcp', () => {
-  test('adds mcp-search without clobbering existing servers', () => {
-    const home = makeScratchHome();
-    writeFileSync(path.join(home, 'mcp.json'), JSON.stringify({ mcpServers: { context7: { url: 'https://mcp.context7.com/mcp' } } }, null, 2));
-    expect(configureKimiMcp()).toBe(0);
-    const mcp = JSON.parse(readFileSync(path.join(home, 'mcp.json'), 'utf-8'));
-    expect(mcp.mcpServers.context7).toBeDefined();
-    expect(mcp.mcpServers['mcp-search'].type).toBe('stdio');
-    expect(mcp.mcpServers['mcp-search'].args[0]).toContain('mcp-server.cjs');
-    // idempotent
-    expect(configureKimiMcp()).toBe(0);
+    const config = readFileSync(configPath, 'utf-8');
+    expect(config).not.toContain(KIMI_MARKER_BEGIN);
+    expect(config).toContain('default_model');
   });
 
-  test('uninstall removes only the mcp-search entry claude-mem wrote', () => {
+  test('removes only the mcp-search entry claude-mem wrote and keeps foreign entries', () => {
     const home = makeScratchHome();
-    writeFileSync(path.join(home, 'mcp.json'), JSON.stringify({ mcpServers: { context7: { url: 'https://mcp.context7.com/mcp' } } }, null, 2));
-    expect(configureKimiMcp()).toBe(0);
+    writeFileSync(path.join(home, 'mcp.json'), JSON.stringify({
+      mcpServers: {
+        context7: { url: 'https://mcp.context7.com/mcp' },
+        'mcp-search': { type: 'stdio', command: 'node', args: ['/x/mcp-server.cjs'] },
+      },
+    }, null, 2));
+    const configPath = path.join(home, 'config.toml');
+    writeFileSync(configPath, BLOCK + '\n');
+
     expect(uninstallKimiHooks()).toBe(0);
+
     const mcp = JSON.parse(readFileSync(path.join(home, 'mcp.json'), 'utf-8'));
     expect(mcp.mcpServers['mcp-search']).toBeUndefined();
     expect(mcp.mcpServers.context7).toBeDefined();
+    expect(readFileSync(configPath, 'utf-8')).not.toContain(KIMI_MARKER_BEGIN);
+  });
 
+  test('leaves a foreign mcp-search entry alone', () => {
+    const home = makeScratchHome();
     const foreign = { mcpServers: { 'mcp-search': { type: 'stdio', command: 'other-tool', args: ['serve'] } } };
     writeFileSync(path.join(home, 'mcp.json'), JSON.stringify(foreign, null, 2));
+
     expect(uninstallKimiHooks()).toBe(0);
+
     expect(JSON.parse(readFileSync(path.join(home, 'mcp.json'), 'utf-8'))).toEqual(foreign);
+  });
+
+  test('is a visible no-op when config.toml is missing', () => {
+    makeScratchHome();
+    expect(uninstallKimiHooks()).toBe(0);
+  });
+
+  test('is stable on repeated cleanup', () => {
+    const home = makeScratchHome();
+    writeFileSync(path.join(home, 'config.toml'), BLOCK + '\n');
+    expect(uninstallKimiHooks()).toBe(0);
+    expect(uninstallKimiHooks()).toBe(0);
+    expect(readFileSync(path.join(home, 'config.toml'), 'utf-8')).not.toContain(KIMI_MARKER_BEGIN);
+  });
+
+  test('fails before mutating config.toml when mcp.json is malformed', () => {
+    const home = makeScratchHome();
+    writeFileSync(path.join(home, 'mcp.json'), '{ broken');
+    const configPath = path.join(home, 'config.toml');
+    writeFileSync(configPath, BLOCK + '\n');
+
+    expect(uninstallKimiHooks()).toBe(1);
+    // Failure ordering: the TOML block must survive when the MCP half fails.
+    expect(readFileSync(configPath, 'utf-8')).toContain(KIMI_MARKER_BEGIN);
+  });
+
+  test('preserves daily backup artifacts byte for byte', () => {
+    const home = makeScratchHome();
+    const configPath = path.join(home, 'config.toml');
+    const backupBytes = 'default_model = "kimi-code/k3"\n\n' + BLOCK + '\n';
+    writeFileSync(configPath, 'default_model = "kimi-code/k3"\n');
+    writeFileSync(`${configPath}.bak-20261031`, backupBytes);
+
+    expect(uninstallKimiHooks()).toBe(0);
+
+    expect(existsSync(`${configPath}.bak-20261031`)).toBe(true);
+    expect(readFileSync(`${configPath}.bak-20261031`, 'utf-8')).toBe(backupBytes);
   });
 });
 
-describe('buildKimiHooksBlock', () => {
-  test('contains all seven rules with TOML literal commands and valid timeouts', () => {
-    const block = buildKimiHooksBlock('/home/u/.bun/bin/bun', '/x/worker-service.cjs');
-    for (const event of ['SessionStart', 'UserPromptSubmit', 'PostToolUse', 'PostToolUseFailure', 'PreToolUse', 'Stop', 'PreCompact']) {
-      expect(block).toContain(`event = "${event}"`);
+describe('checkKimiHooksStatus', () => {
+  test('labels a detected legacy block as retired', () => {
+    const home = makeScratchHome();
+    const configPath = path.join(home, 'config.toml');
+    writeFileSync(configPath, BLOCK + '\n');
+    const lines: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => { lines.push(args.join(' ')); };
+    try {
+      expect(checkKimiHooksStatus()).toBe(0);
+    } finally {
+      console.log = originalLog;
     }
-    expect(block).toContain("command = '\"/home/u/.bun/bin/bun\" \"/x/worker-service.cjs\"");
-    expect(block).toContain('matcher = "Read"');
-    const timeouts = [...block.matchAll(/timeout = (\d+)/g)].map((m) => Number(m[1]));
-    expect(timeouts).toHaveLength(7);
-    for (const t of timeouts) {
-      expect(t).toBeGreaterThanOrEqual(1);
-      expect(t).toBeLessThanOrEqual(600);
+    expect(lines.some((line) => line.startsWith('  Legacy Kimi hook block: detected'))).toBe(true);
+  });
+
+  test('labels an undetected block as retired and keeps the return code', () => {
+    makeScratchHome();
+    const lines: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => { lines.push(args.join(' ')); };
+    try {
+      expect(checkKimiHooksStatus()).toBe(1);
+    } finally {
+      console.log = originalLog;
     }
+    expect(lines.some((line) => line.startsWith('  Legacy Kimi hook block: not detected; active capture is retired'))).toBe(true);
+  });
+});
 
-    // SessionStart only starts the worker; context injection happens on UserPromptSubmit.
-    const sessionStartMatch = block.match(/event = "SessionStart"[\s\S]*?event = "UserPromptSubmit"/);
-    expect(sessionStartMatch).toBeDefined();
-    expect(sessionStartMatch![0]).toContain(" start'");
-    expect(sessionStartMatch![0]).not.toContain('hook kimi context');
-
-    const userPromptSubmitMatch = block.match(/event = "UserPromptSubmit"[\s\S]*?event = "PostToolUse"/);
-    expect(userPromptSubmitMatch).toBeDefined();
-    expect(userPromptSubmitMatch![0]).toContain('hook kimi session-init-context');
-    expect(userPromptSubmitMatch![0]).not.toContain('&&');
+describe('handleKimiCommand refusal', () => {
+  test('refuses install and setup with a message and no writes', async () => {
+    const home = makeScratchHome();
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => { errors.push(args.join(' ')); };
+    try {
+      expect(await handleKimiCommand('install', [])).toBe(1);
+      expect(await handleKimiCommand('setup', [])).toBe(1);
+    } finally {
+      console.error = originalError;
+    }
+    expect(errors.some((line) => line.includes('Unsupported installation target'))).toBe(true);
+    expect(existsSync(path.join(home, 'config.toml'))).toBe(false);
+    expect(existsSync(path.join(home, 'mcp.json'))).toBe(false);
   });
 });

@@ -1,8 +1,9 @@
 > [!NOTE]
+> Marian is maintained by [8818x](https://github.com/8818x).
 > Read [MARIAN.md](MARIAN.md) for this fork's patch history. The first patch is **Maria-1**.
-> Modified by the claude-mem-marian fork. Upstream attribution is retained.
+> This fork modifies [claude-mem](https://github.com/thedotmack/claude-mem) while retaining upstream authorship, licensing and attribution.
 
-Read the [repository guide](REPOSITORY-GUIDE.md) for folder responsibilities and the [complete file catalog](docs/repository-files.md). My Work and Classic Viewer include the four [Catppuccin](https://github.com/catppuccin/catppuccin) themes: Latte, Frappé, Macchiato and Mocha.
+Read the [repository guide](docs/marian/reference/repository-guide.md) for folder responsibilities. My Work and Classic Viewer include the four [Catppuccin](https://github.com/catppuccin/catppuccin) themes: Latte, Frappé, Macchiato and Mocha.
 
 <p align="center">
   <img src="docs/public/marian-edition-logo.png" width="900" alt="claude-mem — Maria(n)-edition">
@@ -12,7 +13,7 @@ Read the [repository guide](REPOSITORY-GUIDE.md) for folder responsibilities and
 
 **Persistent agent memory with fewer OpenRouter requests and more reliable work tracking.**
 
-Marian is a fork of [claude-mem](https://github.com/thedotmack/claude-mem), based on upstream **v15.5.0**. It retains the existing memory format while improving observation batching, session-based agent identity, rejected-rule Undo, and automatic refresh.
+Marian is maintained by [8818x](https://github.com/8818x) and is a fork of [claude-mem](https://github.com/thedotmack/claude-mem), based on upstream **v15.5.0**.
 
 ## What Marian changes
 
@@ -27,6 +28,24 @@ Marian is a fork of [claude-mem](https://github.com/thedotmack/claude-mem), base
 The maintained installation targets are **Claude Code** and **Codex CLI**. Standalone packages, builders and dedicated setup tests for retired clients are no longer shipped. Shared memory code, historical record readers and LLM providers remain available.
 
 Original license, NOTICE and provenance files from retired integrations are retained in [docs/upstream-notices](docs/upstream-notices).
+
+## Distribution policy
+
+This fork is not published to a public plugin marketplace or npm.
+
+Supported plugin installation uses this repository or a GitHub source release, registered as a local marketplace. The `.claude-plugin/`, `.codex-plugin/` and `plugin/` manifests remain for local Claude Code and Codex integration; they do not declare public marketplace publication.
+
+```text
+GitHub repository or Maria-N release
+    ↓
+clone / download source
+    ↓
+local marketplace add
+    ↓
+local plugin install
+```
+
+GitHub Releases are allowed. Public marketplace submissions, listing sync and npm publication are prohibited. No release workflow should publish this fork to a public registry.
 
 ## Install this fork
 
@@ -53,7 +72,7 @@ claude plugin install claude-mem@thedotmack
 The marketplace keeps its upstream identifier, `thedotmack`; registering the **local directory** makes Claude load your built Marian fork. This also changes an existing upstream marketplace registration to the local source. Keep the checkout at that path.
 
 > [!IMPORTANT]
-> Build before installing. `npx claude-mem install` downloads the upstream npm package and is not the installation command for this fork. GitHub marketplace installation alone can load old generated files from this source repository.
+> Build before installing. `npx claude-mem install` downloads the upstream npm package and is not the installation command for this fork. Installing directly from a remote Git source without building can load stale generated files; use the local marketplace commands above.
 
 ### 3. Apply changes to an existing installation
 

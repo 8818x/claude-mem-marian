@@ -2,8 +2,19 @@
 
 This file records changes maintained by the **claude-mem-marian** fork. Fork patches use their own names and tags; upstream version numbers describe the source baseline, not a Marian patch release.
 
+## Distribution policy
+
+This fork is not published to a public plugin marketplace or npm. Supported installation uses the repository or a GitHub source release, registered through a local marketplace. Marketplace manifests remain solely for local Claude Code and Codex integration; they are not publication declarations.
+
+```text
+commit → Maria-N tag → push → GitHub Release → stop
+```
+
+Public marketplace submissions, public listing sync and npm publication are prohibited. Local marketplace registration and GitHub Releases are allowed. The repository keeps `package.json` author credit as Alex Newman; 8818x maintains the fork and its modifications.
+
 ## Unreleased
 
+- Declare source/GitHub Release distribution, prohibit public marketplace and npm publication, and retain local marketplace manifests.
 - Default both web apps to Mocha before JavaScript mounts and when no valid theme is saved. Keep explicit flavor choices and legacy system preferences.
 - Document the fork's tested local-marketplace install path for Claude Code and Codex, including source builds, same-version cache updates and worker verification.
 - Request structured progress reviews with explicit per-field budgets. Keep the existing validator and retry only refused groups; regression coverage reproduces a 228-character change and preserves accepted reviews and evidence.

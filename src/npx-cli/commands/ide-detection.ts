@@ -4,6 +4,11 @@ import { existsSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { IS_WINDOWS } from '../utils/paths.js';
+import {
+  MAINTAINED_INSTALL_TARGETS,
+  requireMaintainedInstallTarget,
+  UnsupportedInstallTargetError,
+} from '../../shared/integration-id.js';
 
 export interface IDEInfo {
   id: string;
@@ -13,8 +18,17 @@ export interface IDEInfo {
 }
 
 export function initialIDESelection(ides: IDEInfo[]): string[] {
-  const detected = ides.filter(ide => ide.detected).map(ide => ide.id);
-  return detected.length ? detected : ['claude-code'];
+  const detected = ides
+    .filter((ide) => ide.detected)
+    .flatMap((ide) => {
+      try {
+        return [requireMaintainedInstallTarget(ide.id)];
+      } catch (error: unknown) {
+        if (!(error instanceof UnsupportedInstallTargetError)) throw error;
+        return [];
+      }
+    });
+  return detected.length ? detected : [MAINTAINED_INSTALL_TARGETS[0].id];
 }
 
 function isCommandInPath(command: string): boolean {
@@ -37,8 +51,10 @@ function isCommandInPath(command: string): boolean {
 }
 
 export function detectInstalledIDEs(): IDEInfo[] {
-  return [
-    { id: 'claude-code', label: 'Claude Code', detected: isCommandInPath('claude'), hint: 'recommended' },
-    { id: 'codex-cli', label: 'Codex CLI', detected: existsSync(join(homedir(), '.codex')), hint: 'native hooks integration' },
-  ];
+  return MAINTAINED_INSTALL_TARGETS.map(({ id, label }) => ({
+    id,
+    label,
+    detected: id === 'claude-code' ? isCommandInPath('claude') : existsSync(join(homedir(), '.codex')),
+    hint: id === 'claude-code' ? 'recommended' : 'native hooks integration',
+  }));
 }

@@ -1,8 +1,12 @@
 ---
 title: Kimi Code Integration
-description: Persistent memory for Kimi Code CLI — hook-based observation recording, prompt-submit context injection, and MCP search tools
+description: "Retired Kimi Code CLI integration — legacy hook cleanup and diagnostics only"
 icon: terminal
 ---
+
+<Warning>
+**Modified by the claude-mem-marian fork:** Kimi named hooks are retired. Legacy `hook kimi` invocations are acknowledged without capturing anything. Install/setup routes reject before configuration writes; `kimi status` and `kimi uninstall` (worker and npx) remain for cleanup. The active-capture instructions below are historical.
+</Warning>
 
 ## Overview
 
@@ -83,20 +87,15 @@ Kimi fires `UserPromptSubmit` on every message and only appends stdout to contex
 
 This approach keeps `MEMORY.md` under your control for curated long-term memory (decisions, preferences, durable facts), while the observation timeline is delivered through the prompt-submit context where it belongs.
 
-## Installation
+## Legacy installation reference
 
-Run the interactive installer and let it auto-detect Kimi Code:
+The commands and configuration details below describe the upstream Kimi integration. They are not instructions for new Marian installs.
 
-```bash
-npx claude-mem install
-```
+Marian's interactive installer does not install Kimi. It only offers Claude Code and Codex CLI as maintained hosts.
 
-The installer detects Kimi via the `~/.kimi-code/` directory or the `kimi` binary on `PATH`. You can also manage the harness directly:
+The previous upstream installer detected Kimi via the `~/.kimi-code/` directory or the `kimi` binary on `PATH`. Existing integrations can be inspected or removed with these legacy management commands:
 
 ```bash
-# Install only the Kimi harness
-npx claude-mem kimi install
-
 # Check whether hooks and MCP are registered
 npx claude-mem kimi status
 
@@ -106,7 +105,7 @@ npx claude-mem kimi uninstall
 
 ### What Gets Installed
 
-The installer writes a marker-delimited managed block into `$KIMI_CODE_HOME/config.toml` (default `~/.kimi-code/config.toml`) containing seven `[[hooks]]` rules:
+The previous upstream installer wrote a marker-delimited managed block into `$KIMI_CODE_HOME/config.toml` (default `~/.kimi-code/config.toml`) containing seven `[[hooks]]` rules:
 
 ```toml
 # >>> claude-mem kimi hooks (managed by claude-mem; do not edit) >>>
@@ -121,7 +120,7 @@ timeout = 60
 
 Only the four fields `event`, `matcher`, `command`, and `timeout` are written. Timeouts range from 60–120 seconds.
 
-The installer also merges the `mcp-search` stdio MCP server into `$KIMI_CODE_HOME/mcp.json` under `mcpServers` if it is absent, preserving any servers already configured.
+It also merged the `mcp-search` stdio MCP server into `$KIMI_CODE_HOME/mcp.json` under `mcpServers` if it was absent, preserving other configured servers.
 
 <Info>
 `KIMI_CODE_HOME` is honored when set; otherwise the default root is `~/.kimi-code`.
@@ -133,9 +132,9 @@ The first time the installer modifies `config.toml`, it writes a backup to `conf
 
 ## Commands
 
-### `npx claude-mem kimi install`
+### Legacy Kimi install action (rejected by Marian)
 
-Install or upgrade the Kimi harness. If the managed block already exists, it is replaced in place (upgrade-safe).
+The upstream command installed or upgraded Kimi hooks. Marian rejects new Kimi installs before configuration writes.
 
 ### `npx claude-mem kimi status`
 

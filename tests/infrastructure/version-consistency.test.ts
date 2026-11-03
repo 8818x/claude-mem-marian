@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '../..');
-const versionManifestFilenames = ['plugin.json', 'openclaw.plugin.json', 'package.json'];
+const versionManifestFilenames = ['plugin.json', 'package.json'];
 const nonNpmVersionManifests = [
 ];
 const independentVersionManifests = new Set([

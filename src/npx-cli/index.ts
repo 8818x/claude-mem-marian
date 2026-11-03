@@ -1,8 +1,21 @@
-// Modified by the claude-mem-marian fork: installer help lists only maintained Claude Code/Codex hosts. Upstream attribution is retained.
+// Modified by the claude-mem-marian fork: installer help lists only maintained Claude Code/Codex hosts, and retired host hook routes (Cursor, Kimi, Windsurf, Antigravity CLI) refuse before forwarding. Upstream attribution is retained.
 import { parseArgs, styleText } from 'node:util';
 import { readPluginVersion } from './utils/paths.js';
 import type { InstallOptions } from './commands/install.js';
 import { resolveInstallerProviderChoice } from './installer-provider-choice.js';
+import { requireMaintainedInstallTarget, UnsupportedInstallTargetError } from '../shared/integration-id.js';
+
+function rejectUnsupportedInstallTarget(target: string): boolean {
+  try {
+    requireMaintainedInstallTarget(target);
+    return false;
+  } catch (error: unknown) {
+    if (!(error instanceof UnsupportedInstallTargetError)) throw error;
+    console.error(error.message);
+    process.exitCode = 1;
+    return true;
+  }
+}
 
 const args = process.argv.slice(2);
 const firstArg = args[0]?.toLowerCase() ?? '';
@@ -24,8 +37,9 @@ ${styleText('bold', 'claude-mem')} v${version} — persistent memory for AI codi
 ${styleText('bold', 'Install Commands')} (no Bun required):
   ${styleText('cyan', 'npx claude-mem')}                     Interactive install
   ${styleText('cyan', 'npx claude-mem install')}              Interactive install (also puts the claude-mem hook launcher on PATH)
-  ${styleText('cyan', 'npx claude-mem install --ide <id>')}   Install for specific IDE
-  ${styleText('cyan', 'npx claude-mem install --provider claude|codex|gemini|openrouter|host')}   Set LLM provider (optional non-interactively; a fresh install defaults to claude). codex, gemini and openrouter need a cmem.ai sign-in in a browser, on either runtime; claude and host need no claude-mem account
+  ${styleText('cyan', 'npx claude-mem install --ide claude-code')}   Install for Claude Code
+  ${styleText('cyan', 'npx claude-mem install --ide codex-cli')}    Install for Codex CLI
+  ${styleText('cyan', 'npx claude-mem install --provider claude|codex|gemini|openrouter')}   Set LLM provider (optional non-interactively; a fresh install defaults to claude). codex, gemini and openrouter need a cmem.ai sign-in in a browser, on either runtime; claude needs no claude-mem account
   ${styleText('cyan', 'npx claude-mem install --model <id>')}   Set Claude or Codex model (when provider=claude|codex)
   ${styleText('cyan', 'npx claude-mem install --no-auto-start')}   Skip worker auto-start at the end
   ${styleText('cyan', 'npx claude-mem install --disable-auto-memory')}   Explicitly disable Claude Code native auto-memory
@@ -34,7 +48,7 @@ ${styleText('bold', 'Install Commands')} (no Bun required):
   ${styleText('cyan', 'npx claude-mem repair')}                Repair runtime (re-runs Bun/uv setup and bun install in plugin cache)
   ${styleText('cyan', 'npx claude-mem prune [--dry-run] [--keep <n>]')}   Remove superseded plugin cache versions (keeps newest 2 + live worker + registered install)
   ${styleText('cyan', 'npx claude-mem update')}               Update to latest version (refreshes the hook launcher)
-  ${styleText('cyan', 'npx claude-mem uninstall')}            Remove plugin, configs and the hook launcher
+  ${styleText('cyan', 'npx claude-mem uninstall [--dry-run]')}  Preview or remove owned plugin, configs and the hook launcher
   ${styleText('cyan', 'npx claude-mem version')}              Print version
 
 ${styleText('bold', 'Runtime Commands')} (requires Bun, delegates to installed plugin):
@@ -52,17 +66,16 @@ ${styleText('bold', 'Runtime Commands')} (requires Bun, delegates to installed p
   ${styleText('cyan', 'npx claude-mem worker start|stop|restart|status')}    Worker compatibility aliases
   ${styleText('cyan', 'npx claude-mem search <query>')}       Search observations
   ${styleText('cyan', 'npx claude-mem mcp')}                    Start the stdio MCP server
-  ${styleText('cyan', 'npx claude-mem hook cursor <event>')}    Run Cursor hook forwarding
   ${styleText('cyan', 'npx claude-mem adopt [--dry-run] [--branch <name>]')}    Stamp merged worktrees into parent project
   ${styleText('cyan', 'npx claude-mem cleanup [--dry-run]')}    Run one-time v12.4.3 pollution cleanup (or preview counts)
   ${styleText('cyan', 'npx claude-mem project merge <from> <into> [--dry-run]')}    Fold one project's memory into another (non-destructive, syncs)
   ${styleText('cyan', 'npx claude-mem backup run|status|list')}   Manage local DB snapshots
   ${styleText('cyan', 'npx claude-mem restore <file>')}       Restore the DB from a snapshot
   ${styleText('cyan', 'npx claude-mem transcript watch')}     Start transcript watcher
-  ${styleText('cyan', 'npx claude-mem antigravity-cli install|status|uninstall')}   Manage Antigravity CLI hooks + MCP config
-  ${styleText('cyan', 'npx claude-mem kimi install|status|uninstall')}   Manage Kimi Code CLI hooks + MCP config
+  ${styleText('cyan', 'npx claude-mem antigravity-cli status|uninstall')}   Inspect or remove a legacy Antigravity CLI integration
+  ${styleText('cyan', 'npx claude-mem kimi status|uninstall')}   Inspect or remove a legacy Kimi Code integration
   ${styleText('cyan', 'npx claude-mem t3code status|uninstall [--settings <path>]')}   Inspect or disable T3 Code provider plugins
-  ${styleText('cyan', 'npx claude-mem pi install|status|uninstall')}   Manage the native Pi extension
+  ${styleText('cyan', 'npx claude-mem pi status|uninstall')}   Inspect or remove a legacy Pi extension
 
 ${styleText('bold', 'TeamBrain')} (one shared brain for your team; your own memory stays private):
   ${styleText('cyan', 'npx claude-mem teambrain start')}                Create a team on cmem.ai
@@ -90,7 +103,6 @@ function parseInstallOptions(argv: string[]): InstallOptions {
       model: { type: 'string' },
       runtime: { type: 'string' },
       'server-url': { type: 'string' },
-      'dsh-profile': { type: 'string' },
       'no-auto-start': { type: 'boolean' },
       'disable-auto-memory': { type: 'boolean' },
     },
@@ -100,8 +112,14 @@ function parseInstallOptions(argv: string[]): InstallOptions {
   const flag = (name: string): string | undefined =>
     typeof values[name] === 'string' ? (values[name] as string) : undefined;
   const provider = flag('provider');
-  if (provider !== undefined && provider !== 'claude' && provider !== 'codex' && provider !== 'gemini' && provider !== 'openrouter' && provider !== 'host') {
-    console.error(`Unknown --provider: ${provider}. Allowed: claude, codex, gemini, openrouter, host`);
+  // Retired with the host observer setup (Decision 05). Saved host observer
+  // configurations are generic OpenRouter settings and keep working unchanged.
+  if (provider === 'host') {
+    console.error('--provider host is no longer supported: host observer setup was retired. Previously saved configurations, including loopback observer settings, keep working unchanged.');
+    process.exit(1);
+  }
+  if (provider !== undefined && provider !== 'claude' && provider !== 'codex' && provider !== 'gemini' && provider !== 'openrouter') {
+    console.error(`Unknown --provider: ${provider}. Allowed: claude, codex, gemini, openrouter`);
     process.exit(1);
   }
   const runtime = flag('runtime');
@@ -113,8 +131,7 @@ function parseInstallOptions(argv: string[]): InstallOptions {
   let resolvedProvider = provider as InstallOptions['provider'];
   // Non-TTY grok-bot: CMEM Pro is the user default. The 'cmem' sentinel is
   // prompt-only (install.ts maps it to openrouter + cmem-observer + OAuth).
-  // Interactive installs still get the CMEM/Claude prompt. `--provider host`
-  // stays an explicit loopback-shim opt-in.
+  // Interactive installs still get the CMEM/Claude prompt.
   if (!resolvedProvider && process.stdin.isTTY !== true) {
     const implicit = resolveInstallerProviderChoice({ ide });
     if (implicit) {
@@ -132,7 +149,6 @@ function parseInstallOptions(argv: string[]): InstallOptions {
     disableAutoMemory: values['disable-auto-memory'] === true,
     runtime: runtime as InstallOptions['runtime'],
     serverUrl: flag('server-url'),
-    dshProfile: flag('dsh-profile'),
   };
 }
 
@@ -151,8 +167,10 @@ async function main(): Promise<void> {
   switch (command) {
     case '':
     case 'install': {
+      const options = parseInstallOptions(args);
+      if (options.ide !== undefined && rejectUnsupportedInstallTarget(options.ide)) break;
       const { runInstallCommand } = await import('./commands/install.js');
-      await runInstallCommand(parseInstallOptions(args));
+      await runInstallCommand(options);
       break;
     }
 
@@ -172,7 +190,7 @@ async function main(): Promise<void> {
     case 'uninstall':
     case 'remove': {
       const { runUninstallCommand } = await import('./commands/uninstall.js');
-      await runUninstallCommand();
+      await runUninstallCommand({ dryRun: args.slice(1).includes('--dry-run') });
       break;
     }
 
@@ -242,8 +260,10 @@ async function main(): Promise<void> {
     }
 
     case 'antigravity-cli': {
+      const action = args[1]?.toLowerCase();
+      if ((action === 'install' || action === 'setup') && rejectUnsupportedInstallTarget('antigravity-cli')) break;
       const { handleAntigravityCliCommand } = await import('../services/integrations/AntigravityCliHooksInstaller.js');
-      const exitCode = await handleAntigravityCliCommand(args[1]?.toLowerCase(), args.slice(2));
+      const exitCode = await handleAntigravityCliCommand(action, args.slice(2));
       if (typeof exitCode === 'number') {
         process.exit(exitCode);
       }
@@ -253,30 +273,33 @@ async function main(): Promise<void> {
     case 't3':
     case 't3-code':
     case 't3code': {
+      const action = args[1]?.toLowerCase();
+      if ((action === 'install' || action === 'setup') && rejectUnsupportedInstallTarget('t3code')) break;
       const { t3CodeStatus, uninstallT3Code } = await import('../services/integrations/T3CodeInstaller.js');
       const { values } = parseArgs({ args: args.slice(2), options: { settings: { type: 'string' } } });
       const options = { settingsPath: values.settings };
-      if (args[1] === 'status') process.exit(t3CodeStatus(options));
-      if (args[1] === 'uninstall') process.exit(uninstallT3Code(options));
+      if (action === 'status') process.exit(t3CodeStatus(options));
+      if (action === 'uninstall') process.exit(uninstallT3Code(options));
       console.error('Usage: npx claude-mem t3code status|uninstall [--settings <path>]');
-      console.error('Install with: npx claude-mem install --ide t3code');
       process.exit(1);
       break;
     }
 
     case 'pi': {
-      const { installPiExtension, uninstallPiExtension, piExtensionStatus } = await import('../services/integrations/PiInstaller.js');
       const action = args[1]?.toLowerCase();
-      const code = action === 'install' ? installPiExtension()
-        : action === 'uninstall' ? uninstallPiExtension()
+      if ((action === 'install' || action === 'setup') && rejectUnsupportedInstallTarget('pi')) break;
+      const { uninstallPiExtension, piExtensionStatus } = await import('../services/integrations/PiInstaller.js');
+      const code = action === 'uninstall' ? uninstallPiExtension()
         : action === 'status' ? piExtensionStatus() : 1;
-      if (!['install', 'uninstall', 'status'].includes(action ?? '')) console.error('Usage: npx claude-mem pi install|status|uninstall');
+      if (!['uninstall', 'status'].includes(action ?? '')) console.error('Usage: npx claude-mem pi status|uninstall');
       process.exitCode = code;
       break;
     }
     case 'kimi': {
+      const action = args[1]?.toLowerCase();
+      if ((action === 'install' || action === 'setup') && rejectUnsupportedInstallTarget('kimi')) break;
       const { handleKimiCommand } = await import('../services/integrations/KimiHooksInstaller.js');
-      const exitCode = await handleKimiCommand(args[1]?.toLowerCase(), args.slice(2));
+      const exitCode = await handleKimiCommand(action, args.slice(2));
       if (typeof exitCode === 'number') {
         process.exit(exitCode);
       }
@@ -302,6 +325,30 @@ async function main(): Promise<void> {
     }
 
     case 'hook': {
+      // Decision 08 / 09 / 10: refuse the retired Cursor, Kimi, and Windsurf
+      // hook routes before the runtime forwarding import can resolve a worker
+      // or spawn anything. Exact tokens only — no case folding, no aliases.
+      // Decision 10: bare `hook windsurf` (no event) also refuses.
+      if (args[1] === 'cursor') {
+        const { refuseRetiredCursorHook } = await import('../cli/retired-hooks.js');
+        refuseRetiredCursorHook();
+        break;
+      }
+      if (args[1] === 'kimi') {
+        const { refuseRetiredKimiHook } = await import('../cli/retired-hooks.js');
+        refuseRetiredKimiHook();
+        break;
+      }
+      if (args[1] === 'windsurf') {
+        const { refuseRetiredWindsurfHook } = await import('../cli/retired-hooks.js');
+        refuseRetiredWindsurfHook();
+        break;
+      }
+      if (args[1] === 'antigravity' || args[1] === 'antigravity-cli') {
+        const { refuseRetiredAntigravityHook } = await import('../cli/retired-hooks.js');
+        refuseRetiredAntigravityHook();
+        break;
+      }
       const { runHookCommand } = await import('./commands/runtime.js');
       runHookCommand(args.slice(1));
       break;

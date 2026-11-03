@@ -2,7 +2,7 @@
  * Guarded worker shutdown sequence: the dying worker drains gracefully under
  * a hard deadline and, on restart, spawns its own successor so no other
  * process races it for the port
- * (plans/2026-06-10-worker-restart-single-source-of-truth.md).
+ * (docs/upstream/plans/2026-06-10-worker-restart-single-source-of-truth.md).
  *
  * This lives in its own module rather than inside worker-service.ts for the
  * same reason as restart-verify.ts: worker-service.ts drags in a very large

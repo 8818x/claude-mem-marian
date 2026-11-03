@@ -1,1 +1,0 @@
-../scaffold-large-gate-off.sh

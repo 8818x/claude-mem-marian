@@ -260,12 +260,13 @@ function withoutStaleRootCopies(document) {
   if (classifySettingsDocument(document) !== "nested") return document;
   return Object.fromEntries(Object.entries(document).filter(([key]) => !key.startsWith("CLAUDE_MEM_")));
 }
-var isRecord;
+var isRecord, QUARANTINE_MAX_AGE_MS;
 var init_settings_document = __esm({
   "src/shared/settings-document.ts"() {
     "use strict";
     init_atomic_json();
     isRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+    QUARANTINE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1e3;
   }
 });
 
@@ -350,6 +351,86 @@ var init_paths = __esm({
   }
 });
 
+// src/utils/credential-redaction.ts
+function stripControlChars(text2) {
+  return text2.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+}
+function keyedLookbehind(key) {
+  return `(?<=${key}${BOUNDED_SPACE}[=:]${BOUNDED_SPACE}${OPTIONAL_QUOTE})`;
+}
+function buildCredentialPatterns() {
+  return [
+    // --- Authorization headers, bearer/basic credentials.
+    { name: "authorization_header", regex: /\bAuthorization["']?\s*:\s*["']?\s*(?:Bearer|Basic|token)\s+[^"'\s,;)}\]]{6,}/gi },
+    { name: "bearer", regex: /\bBearer\s+[A-Za-z0-9._-]{8,512}\b/gi },
+    { name: "basic_auth", regex: /\bBasic\s+[A-Za-z0-9+/]{8,}={0,2}/g },
+    // --- redaction.ts built-ins, kept in step with src/utils/redaction.ts.
+    { name: "aws_access_key", regex: /(?:AKIA|ASIA)[0-9A-Z]{16}/g },
+    { name: "aws_secret_key", regex: new RegExp(`${keyedLookbehind(String.raw`(?:aws_secret_access_key|\bSecretAccessKey)`)}[A-Za-z0-9/+=]{40}`, "gi") },
+    { name: "aws_session_token", regex: new RegExp(`${keyedLookbehind(String.raw`\b(?:aws_session_token|SessionToken)`)}[A-Za-z0-9/+=]{100,}`, "gi") },
+    { name: "github_pat", regex: /\bgh[oprsu]_[A-Za-z0-9]{36}\b|\bgithub_pat_[A-Za-z0-9_]{82}\b/g },
+    { name: "openai_key", regex: /\bsk-(?!ant-)[A-Za-z0-9_-]{20,}(?!\w)/g },
+    { name: "anthropic_key", regex: /\bsk-ant-[A-Za-z0-9_-]{20,}(?!\w)/g },
+    { name: "slack_token", regex: /\b(?:xox[abeprs]|xapp)-[A-Za-z0-9-]{10,}(?!\w)/g },
+    { name: "jwt", regex: /\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(?!\w)/g },
+    { name: "private_key_pem", regex: /-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END (?:RSA |DSA |EC |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----/g },
+    { name: "stripe_key", regex: /\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{24,}\b/g },
+    { name: "google_api_key", regex: /\bAIza[0-9A-Za-z_-]{35}(?!\w)/g },
+    // claude-mem's own keys: server API keys and cmem.ai Pro memory keys.
+    { name: "claude_mem_key", regex: /\bcmem_[A-Za-z0-9_-]{32,}|\bcm_pro_[A-Za-z0-9_-]{8,}/g },
+    // --- error-scrub.ts URL/userinfo pattern: any scheme://… match is
+    // rewritten keeping scheme+host+path, dropping ?query/#fragment and
+    // replacing user:pass@ with [REDACTED]@ (connection-string credentials).
+    {
+      name: "url_credentials",
+      regex: /\b[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'()]+/g,
+      transform: (match) => match.replace(/[?#].*$/, "").replace(/^([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/@\s]+@/, `$1${CREDENTIAL_REDACTED}@`)
+    }
+  ];
+}
+function redactAssignmentSecrets(text2) {
+  return text2.replace(
+    /\b(access[_-]?token|api[_-]?key|auth(?:orization)?|secret|password|passwd|jwt|session[_-]?id|token)=(?!"?$)([^"'\s&]{1,})/gi,
+    (_match, key) => `${key}=${CREDENTIAL_REDACTED}`
+  ).replace(
+    /(--(?:token|secret|api[_-]key)(?:=|[ ]))([^"&\s]{6,})/gi,
+    (_match, prefix) => `${prefix}${CREDENTIAL_REDACTED}`
+  );
+}
+function scrubCredentials(text2) {
+  if (typeof text2 !== "string" || text2.length === 0) {
+    return typeof text2 === "string" ? text2 : "";
+  }
+  let working = text2;
+  for (const value of registeredScrubValues) {
+    if (working.includes(value)) {
+      working = working.split(value).join(CREDENTIAL_REDACTED);
+    }
+  }
+  working = redactAssignmentSecrets(working);
+  for (const pattern of buildCredentialPatterns()) {
+    pattern.regex.lastIndex = 0;
+    working = pattern.regex.global ? working.replace(pattern.regex, pattern.transform ?? (() => CREDENTIAL_REDACTED)) : working.replace(pattern.regex, pattern.transform ?? (() => CREDENTIAL_REDACTED));
+  }
+  working = stripControlChars(working);
+  if (working.length > MAX_SCRUB_INPUT_CHARS) {
+    working = `${working.slice(0, MAX_SCRUB_INPUT_CHARS)}${CREDENTIAL_REDACTED}`;
+  }
+  return working;
+}
+var CREDENTIAL_REDACTED, MAX_SCRUB_INPUT_CHARS, registeredScrubValues, GENERIC_VALUE_CLASS, OPTIONAL_QUOTE, BOUNDED_SPACE;
+var init_credential_redaction = __esm({
+  "src/utils/credential-redaction.ts"() {
+    "use strict";
+    CREDENTIAL_REDACTED = "[REDACTED]";
+    MAX_SCRUB_INPUT_CHARS = 8192;
+    registeredScrubValues = [];
+    GENERIC_VALUE_CLASS = String.raw`[A-Za-z0-9_.\-+/=~@#$%^*!?]`;
+    OPTIONAL_QUOTE = String.raw`(?:\\{0,3}["'])?`;
+    BOUNDED_SPACE = String.raw`\s{0,8}`;
+  }
+});
+
 // src/utils/logger.ts
 import { closeSync as closeSync2, existsSync as existsSync4, fstatSync, mkdirSync as mkdirSync3, openSync as openSync2, statSync as statSync2, writeSync as writeSync2 } from "fs";
 import { dirname as dirname3, join as join5 } from "path";
@@ -361,6 +442,7 @@ var init_logger = __esm({
     init_hook_io();
     init_atomic_json();
     init_settings_document();
+    init_credential_redaction();
     LogLevel = /* @__PURE__ */ ((LogLevel2) => {
       LogLevel2[LogLevel2["DEBUG"] = 0] = "DEBUG";
       LogLevel2[LogLevel2["INFO"] = 1] = "INFO";
@@ -626,17 +708,18 @@ ${data.stack}` : ` ${data.message}`;
           }
         }
         const logLine = `[${timestamp}] [${levelStr}] [${componentStr}] ${correlationStr}${message}${contextStr}${dataStr}`;
+        const safeLogLine = scrubCredentials(logLine);
         if (this.logFilePath) {
           try {
-            this.appendLine(this.logFilePath, logLine + "\n");
+            this.appendLine(this.logFilePath, safeLogLine + "\n");
           } catch (error) {
             const err = error instanceof Error ? error : new Error(String(error));
-            emitDiagnostic(`[LOGGER] Failed to write to log file: ${err.message}
-${err.stack ?? ""}
+            emitDiagnostic(`[LOGGER] Failed to write to log file: ${scrubCredentials(err.message)}
+${scrubCredentials(err.stack ?? "")}
 `);
           }
         } else {
-          emitDiagnostic(logLine + "\n");
+          emitDiagnostic(safeLogLine + "\n");
         }
       }
       debug(component, message, context, data) {
@@ -885,6 +968,8 @@ var init_SettingsDefaultsManager = __esm({
         // Changing it strands installs that were seeded with the old id: add that
         // id to RETIRED_OPENROUTER_DEFAULT_MODELS.
         CLAUDE_MEM_OPENROUTER_MODEL: "cohere/north-mini-code:free",
+        CLAUDE_MEM_OPENROUTER_OBSERVATION_BATCH_SIZE: "8",
+        // Pending events per request (1-32); 1 keeps individual requests.
         CLAUDE_MEM_OPENROUTER_BASE_URL: "",
         // #2382/#2590/#2622/#2393 — optional OpenAI-compatible base URL (e.g. https://api.deepseek.com, http://localhost:1234/v1). Empty = default OpenRouter endpoint.
         CLAUDE_MEM_OPENROUTER_TEMPERATURE: "",
@@ -2451,6 +2536,58 @@ var init_oauth_token = __esm({
   }
 });
 
+// src/supervisor/env-sanitizer.ts
+var ENV_PROXY_VARS, ENV_PRESERVE;
+var init_env_sanitizer = __esm({
+  "src/supervisor/env-sanitizer.ts"() {
+    "use strict";
+    ENV_PROXY_VARS = /* @__PURE__ */ new Set([
+      "HTTP_PROXY",
+      "HTTPS_PROXY",
+      "ALL_PROXY",
+      "NO_PROXY",
+      "http_proxy",
+      "https_proxy",
+      "all_proxy",
+      "no_proxy",
+      "npm_config_proxy",
+      "npm_config_https_proxy",
+      "npm_config_noproxy"
+    ]);
+    ENV_PRESERVE = /* @__PURE__ */ new Set([
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "CLAUDE_CODE_GIT_BASH_PATH",
+      // The CLI documents CLAUDE_CODE_TMPDIR as the fix for a root-owned per-uid
+      // /tmp/claude-<uid> directory (#4161). Stripping it here sent the SDK child
+      // back to /tmp, so the child hit that directory and exited 1 on every spawn
+      // — the user's only documented escape did nothing.
+      "CLAUDE_CODE_TMPDIR",
+      // claude-mem's own setting, not a CLI knob (the CLI never reads it): the
+      // path to the claude binary, documented as settable from the file OR the
+      // env. Every daemon spawn passes through sanitizeEnv, and the worker reads
+      // the env override (SettingsDefaultsManager.applyEnvOverrides), so
+      // stripping it silently dropped the env form.
+      "CLAUDE_CODE_PATH",
+      "CLAUDE_CODE_USE_BEDROCK",
+      "CLAUDE_CODE_USE_VERTEX",
+      "CLAUDE_CODE_USE_FOUNDRY",
+      "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
+      "CLAUDE_CODE_SKIP_VERTEX_AUTH",
+      "CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
+      "ANTHROPIC_BEDROCK_BASE_URL",
+      "AWS_REGION",
+      "AWS_PROFILE",
+      "AWS_ACCESS_KEY_ID",
+      "AWS_SECRET_ACCESS_KEY",
+      "AWS_SESSION_TOKEN",
+      "ANTHROPIC_VERTEX_PROJECT_ID",
+      "CLOUD_ML_REGION",
+      "GOOGLE_APPLICATION_CREDENTIALS",
+      ...ENV_PROXY_VARS
+    ]);
+  }
+});
+
 // src/shared/EnvManager.ts
 import { existsSync as existsSync9, readFileSync as readFileSync7, writeFileSync as writeFileSync2, mkdirSync as mkdirSync4, chmodSync } from "fs";
 import { parseEnv } from "util";
@@ -2491,6 +2628,7 @@ var init_EnvManager = __esm({
     init_atomic_json();
     init_SettingsDefaultsManager();
     init_oauth_token();
+    init_env_sanitizer();
     CREDENTIAL_KEYS = [
       "ANTHROPIC_API_KEY",
       "ANTHROPIC_FALLBACK_API_KEY",

@@ -1,3 +1,4 @@
+// Modified by the claude-mem-marian fork: drops the retired host provider from the account-gate assertions.
 import { describe, it, expect } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
@@ -9,9 +10,8 @@ const source = readFileSync(
 );
 
 describe('provider account gate', () => {
-  it('exempts the local Anthropic plan and host installs from the account requirement', () => {
+  it('exempts the local Anthropic plan from the account requirement', () => {
     expect(providerNeedsAccount('claude')).toBe(false);
-    expect(providerNeedsAccount('host')).toBe(false);
   });
 
   it('still requires an account when no provider was named', () => {
@@ -75,6 +75,7 @@ describe('install help text (#4131)', () => {
       expect(providerNeedsAccount(provider)).toBe(true);
     }
     expect(providerLine).toContain('codex, gemini and openrouter need a cmem.ai sign-in');
-    expect(providerLine).toContain('claude and host need no claude-mem account');
+    expect(providerLine).toContain('claude needs no claude-mem account');
+    expect(providerLine).not.toContain('host');
   });
 });

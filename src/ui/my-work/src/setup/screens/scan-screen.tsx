@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { CheckIcon } from 'lucide-react'
 import { AgentMark } from '@/components/brand'
 import { DottedGlowBackground } from '@/components/aceternity/dotted-glow-background'
@@ -5,6 +6,8 @@ import { agentToolFor, type SetupScanPhase, type SetupScanView } from '../setup-
 import { scanAgentStatus } from '../setup-scan-status'
 import { useMatchesMedia } from '@/lib/use-media'
 import { PageHeading } from './shared'
+
+// Modified by the claude-mem-marian fork: Decision 15 hosted-extraction disclosure and authorization actions.
 
 /** PROTO savings.js status phrases, one per scan phase. */
 const STATUS: Record<SetupScanPhase, string> = {
@@ -17,17 +20,67 @@ const STATUS: Record<SetupScanPhase, string> = {
   failed: 'Setup stopped. Try again when you are ready.',
 }
 
-/** Step 1: each detected agent ticks in and its prompt count climbs while the worker reads the last 30 days. */
-export function ScanScreen({ scan, onImproveProductChange, preferenceError, onRetry, retrying, retryError }: {
+/** Decision 15 disclosure: what hosted extraction sends, where, with which credentials, and that it is not
+ * anonymous. Product improvement is a separate preference and never an alias for this choice. */
+function HostedAuthorization({ scan, onImproveProductChange, onGrantHostedUpload, onChooseLocalOnly, hostedError }: {
   scan: SetupScanView
   onImproveProductChange: (improveProduct: boolean) => void
+  onGrantHostedUpload: () => void
+  onChooseLocalOnly: () => void
+  hostedError: string | null
+}) {
+  return (
+    <div className="scan-hosted-authorization">
+      {scan.hostedSkipped && scan.done && (
+        <p className="scan-hosted-skip" role="status">
+          Hosted extraction was skipped, so these results stay local. Your prompts were only read on this
+          computer; setup can continue without them leaving it.
+        </p>
+      )}
+      <p className="scan-hosted-disclosure">
+        Optional: to find your goals, work and rules, hosted extraction sends the text you typed to your AI
+        coding tools in the last 30 days — including prompts found stored on this computer — to claude-mem's
+        hosted service at cmem.ai, together with each prompt's session identifier, timestamp and project
+        folder, plus your timezone offset. It runs with your CMEM account when you are signed in, or with this
+        installation's own hosted setup credentials otherwise. Prompt text may contain identifying or
+        sensitive information: this upload is not anonymous, and it happens only if you choose it here.
+      </p>
+      <div className="scan-hosted-actions">
+        <button type="button" className="scan-hosted-upload" onClick={onGrantHostedUpload} disabled={scan.phase === 'uploading'}>
+          Send prompts for hosted extraction
+        </button>
+        <button type="button" className="scan-hosted-local" onClick={onChooseLocalOnly}>
+          Continue without uploading
+        </button>
+      </div>
+      <label className="scan-improve-product">
+        <input type="checkbox" checked={scan.improveProduct} disabled={scan.phase === 'uploading'} onChange={(event) => onImproveProductChange(event.target.checked)} />
+        <span>Help improve claude-mem: let this hosted run also be used for product improvement. Turning this off does not stop an authorized upload of your prompts.</span>
+      </label>
+      {hostedError && <p className="scan-error" role="alert">{hostedError}</p>}
+    </div>
+  )
+}
+
+/** Step 1: each detected agent ticks in and its prompt count climbs while the worker reads the last 30 days. */
+export function ScanScreen({ scan, onImproveProductChange, onGrantHostedUpload, hostedError, preferenceError, onRetry, retrying, retryError }: {
+  scan: SetupScanView
+  onImproveProductChange: (improveProduct: boolean) => void
+  onGrantHostedUpload: () => void
+  hostedError: string | null
   preferenceError: string | null
   onRetry: () => void
   retrying: boolean
   retryError: string | null
 }) {
+  const [localOnly, setLocalOnly] = useState(false)
   const detected = scan.agents.filter((agent) => agent.detected)
   const reducedMotion = useMatchesMedia('(prefers-reduced-motion: reduce)')
+  // The authorization question exists from scan start until the extraction decision settles: it hides while
+  // the authorized upload runs, and after a hosted outcome (done without a skip). SSE, polling and preference
+  // changes never reopen it: the local-only dismissal holds for the page's lifetime until a full reload.
+  const settled = scan.phase === 'uploading' || (scan.phase === 'done' && !scan.hostedSkipped)
+  const showAuthorization = !settled && !localOnly
   return (
     <section aria-labelledby="scan-title">
       <PageHeading id="scan-title" title="Checking your AI usage." lead={detected.map((agent) => agent.label).join(' · ') || undefined} />
@@ -52,10 +105,25 @@ export function ScanScreen({ scan, onImproveProductChange, preferenceError, onRe
           <progress max={100} value={scan.percent} aria-label="Scan progress">{scan.percent}%</progress>
           <span className="scan-percent" aria-hidden="true">{scan.percent}%</span>
         </div>
-        <label className="scan-improve-product">
-          <input type="checkbox" checked={scan.improveProduct} disabled={scan.phase === 'uploading'} onChange={(event) => onImproveProductChange(event.target.checked)} />
-          <span>Help make claude-mem smarter for everyone with my anonymized setup results</span>
-        </label>
+        {showAuthorization && (
+          <HostedAuthorization
+            scan={scan}
+            onImproveProductChange={onImproveProductChange}
+            onGrantHostedUpload={onGrantHostedUpload}
+            onChooseLocalOnly={() => setLocalOnly(true)}
+            hostedError={hostedError}
+          />
+        )}
+        {localOnly && !settled && (
+          <div className="scan-hosted-authorization is-local-only">
+            <p className="scan-hosted-skip" role="status">Hosted extraction stays off for this scan; results are local only.</p>
+            <div className="scan-hosted-actions">
+              <button type="button" className="scan-hosted-upload" onClick={onGrantHostedUpload} disabled={scan.phase === 'uploading'}>
+                Send prompts for hosted extraction
+              </button>
+            </div>
+          </div>
+        )}
         <p className="scan-status" role="status" aria-live="polite">{STATUS[scan.phase]}</p>
         {preferenceError && <p className="scan-error" role="alert">{preferenceError}</p>}
         {scan.error && <p className="scan-error" role="alert">{scan.error}</p>}

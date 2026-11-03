@@ -1,3 +1,4 @@
+// Modified by the claude-mem-marian fork: the retired Cursor context-update callback is removed from the shared summary path. Upstream attribution is retained.
 
 import { logger } from '../../../utils/logger.js';
 import { hasStorableTitle } from '../../sqlite/observations/store.js';
@@ -11,7 +12,6 @@ import {
   isTransportFailureObserverOutput,
   previewOutput,
 } from '../../../sdk/output-classifier.js';
-import { updateCursorContextForProject } from '../../integrations/CursorHooksInstaller.js';
 import { notifyTelegram } from '../../integrations/TelegramNotifier.js';
 import { notifyNotion } from '../../integrations/NotionExporter.js';
 import { notifyGrokBotAwareness } from '../../integrations/GrokBotAwarenessPusher.js';
@@ -797,7 +797,7 @@ export async function processAgentResponse(
   // at the observation that now summarizes them. It has to happen here and not
   // at ingest — the observation did not exist yet, and neither did
   // memorySessionId. The batch's FIRST observation id owns the link (see
-  // linkToolUsesToObservation), and RECEIPT-JOIN.md documents that
+  // linkToolUsesToObservation), and docs/expense-pricing/RECEIPT-JOIN.md documents that
   // observation_id is a pointer into the batch, not a 1:1 mapping; the reliable
   // per-call join stays (content_session_id, tool_use_id).
   //
@@ -1238,9 +1238,5 @@ async function syncAndBroadcastSummary(
     project: context.project,
     prompt_number: context.promptNumber,
     created_at_epoch: result.createdAtEpoch
-  });
-
-  updateCursorContextForProject(context.project).catch(error => {
-    logger.warn('CURSOR', 'Context update failed (non-critical)', { project: context.project }, error as Error);
   });
 }

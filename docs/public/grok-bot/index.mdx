@@ -3,6 +3,8 @@ title: "Grok Bot Integration"
 description: "Persistent memory for Grok Bot — no host hooks, no Claude CLI, no xAI API key"
 ---
 
+> **Modified by the claude-mem-marian fork:** `--provider host` observer setup is retired for new installations. Previously saved loopback observer configurations keep working unchanged, and the Grok Bot runtime (transcript watcher, worker callbacks, INDEX writer) is unchanged. Upstream attribution is retained.
+
 # Grok Bot Integration
 
 > **Your Grok Bot remembers.** Claude-mem captures what the agent does, compresses it, and injects it into later sessions.
@@ -12,7 +14,7 @@ description: "Persistent memory for Grok Bot — no host hooks, no Claude CLI, n
     Ingest is a transcript watcher on agent JSONL, not Cursor-style hooks.
   </Card>
   <Card title="CMEM Pro default" icon="cloud">
-    `npx claude-mem install --ide grok-bot` pre-selects CMEM Pro. `--provider host` is opt-in.
+    `npx claude-mem install --ide grok-bot` pre-selects CMEM Pro.
   </Card>
   <Card title="Independent of Cursor" icon="puzzle-piece">
     Install Grok Bot only, Cursor only, or both. Neither host requires the other.
@@ -32,7 +34,7 @@ Grok Bot has no session-start, file-read, or tool-use hooks. Claude-mem wires up
 
 1. **Transcript watcher** tails `agent-transcripts/*/*.jsonl` and stamps `platformSource=grok-bot`.
 2. **Local worker** stores sessions and serves search (default port `37700 + uid % 100` on `127.0.0.1`).
-3. **Observer (CMEM Pro by default)** — observation extraction runs off-plan through `https://cmem.ai/api/inference/v1` with model `cmem-observer`. Opt in to a **host observer** with `--provider host` (this Grok login over a local OpenAI-compatible loopback, no API key).
+3. **Observer (CMEM Pro by default)** — observation extraction runs off-plan through `https://cmem.ai/api/inference/v1` with model `cmem-observer`.
 4. **MCP** exposes search to the bot (`search` → `timeline` → `get_observations`).
 5. **Live timeline INDEX** — as observations land, the worker rewrites `agents/<agent_id>/memory/log/zz-claude-mem-inject.md`. The host already mid-attaches that file as Memory facts. The file keeps growing (newest IDs slide on; oldest slide off). Thin per-seat diaries are filled from the newest house observations so a seat with only a handful of its own rows still gets a useful INDEX.
 6. **Awareness push (pilot)** — after an observation is stored, needle types are appended as one dated fact line into that bot's Grok memory log (`YYYY-MM.md`). That is not the INDEX.
@@ -49,11 +51,7 @@ Grok Bot does **not** use Claude Code hook stdin, so the `#2188` empty-stdin / `
 npx claude-mem install --ide grok-bot
 ```
 
-That starts a **local worker** with **CMEM Pro** as the observer (pre-selected). Local host-login observer is opt-in:
-
-```bash
-npx claude-mem install --ide grok-bot --provider host
-```
+That starts a **local worker** with **CMEM Pro** as the observer (pre-selected). The former `--provider host` loopback observer setup is retired for new installations; a previously saved loopback observer configuration keeps working unchanged.
 
 `--ide` takes a **single** host. To also wire Cursor, run a second install (do not pass `--ide` twice on one command — only the last value is kept):
 
@@ -88,20 +86,20 @@ After the plugin is installed, still run the CLI above for a local worker, or se
 | Piece | Default | Opt-in / remote |
 | --- | --- | --- |
 | Worker | `npx claude-mem install --ide grok-bot` | `--runtime server --server-url` |
-| Observer | CMEM Pro (`cmem-observer` at `https://cmem.ai/api/inference/v1`) | `--provider host` (loopback, logged-in Grok Bot, no API key) or `--provider openrouter` |
+| Observer | CMEM Pro (`cmem-observer` at `https://cmem.ai/api/inference/v1`) | `--provider openrouter` (any OpenAI-compatible endpoint, including a loopback URL) |
 | MCP | `npx -y claude-mem mcp` | `https://cmem.ai/api/mcp` with `Authorization: Bearer ${CLAUDE_MEM_MCP_TOKEN}` |
 
-`--provider host` is an OpenRouter-shaped loopback: `CLAUDE_MEM_OPENROUTER_BASE_URL=http://127.0.0.1:<shim>/v1` plus a dummy non-empty API key. You do not configure that by hand.
+A loopback observer is a generic OpenRouter configuration: `CLAUDE_MEM_OPENROUTER_BASE_URL=http://127.0.0.1:<port>/v1` plus a non-empty API key. Configurations saved by the retired `--provider host` setup have exactly this shape and keep working unchanged.
 
-**Port rule:** the observer shim must **not** bind the worker port. The worker is often `37700 + (uid % 100)`. On macOS it is often **37777** — if that port is taken, the shim uses **37778** (or `CLAUDE_MEM_HOST_OBSERVER_PORT`).
+**Port rule:** the observer must **not** bind the worker port. The worker is often `37700 + (uid % 100)`. On macOS it is often **37777**; if that port is taken, run the observer on another port, for example **37778**.
 
 Never restart a healthy worker. The observation queue is in RAM and a restart drops it.
 
-Host-observer idle replies must be `skip_summary` XML; a finished unit is one `observation`. Prose like "still observing" **drops the batch** ([issue #2485](https://github.com/thedotmack/claude-mem/issues/2485)).
+Loopback-observer idle replies must be `skip_summary` XML; a finished unit is one `observation`. Prose like "still observing" **drops the batch** ([issue #2485](https://github.com/thedotmack/claude-mem/issues/2485)).
 
-## XML contract (host observer)
+## XML contract (loopback observer)
 
-When using `--provider host`, the worker parser only accepts three roots.
+For a loopback observer on the generic OpenRouter slot, the worker parser only accepts three roots.
 
 **Idle / init / no tool results yet:**
 
@@ -169,7 +167,7 @@ Writes from this host stamp `platformSource=grok-bot`. When reading, do not drop
 1. Worker health: open `http://127.0.0.1:<worker-port>/api/health` (port is in `~/.claude-mem/.worker.port` or settings).
 2. Memory viewer: open the worker URL printed at install.
 3. Do a small unit of work in Grok Bot, then search. New observations should show `platformSource=grok-bot`.
-4. Default observer: first real observation stores via model `cmem-observer`. Host observer: if the queue sits idle, the reply is probably prose instead of `skip_summary`.
+4. Default observer: first real observation stores via model `cmem-observer`. Loopback observer: if the queue sits idle, the reply is probably prose instead of `skip_summary`.
 5. Live INDEX: after an observation is stored (any project on this worker), `agents/<this-seat-uuid>/memory/log/zz-claude-mem-inject.md` should gain a new newest row (`- (YYYY-MM-DD) [episode] [claude-mem] <id> …`) without anyone hand-writing the file. A thin seat project still fills from the newest house rows. Turn off with `CLAUDE_MEM_GROK_BOT_INJECT_ENABLED=false`.
 6. Awareness push pilot (LFG + Orifice): a needle observation (`decision`, `bugfix`, `security_alert`, `sensitive`) should append `- YYYY-MM-DD [awareness] …` to `agents/<agent_id>/memory/log/YYYY-MM.md`. Nothing is written to `profile.md`. Turn off with `CLAUDE_MEM_GROK_BOT_AWARENESS_ENABLED=false`.
 
@@ -179,7 +177,7 @@ Writes from this host stamp `platformSource=grok-bot`. When reading, do not drop
 
 - Confirm the worker is up and you did **not** restart a healthy one.
 - CMEM Pro: check `/api/health` (provider openrouter) and `/api/sync/status`. See [CMEM Pro (manual / headless)](/cmem-pro-headless).
-- Host observer: confirm the reply is XML (`skip_summary` or `observation`), and the shim is not on the worker port (macOS: worker 37777 → shim 37778).
+- Loopback observer: confirm the reply is XML (`skip_summary` or `observation`), and the observer is not on the worker port (macOS: worker 37777, observer 37778).
 
 ### `npx claude-mem install --ide grok-bot` is rejected
 

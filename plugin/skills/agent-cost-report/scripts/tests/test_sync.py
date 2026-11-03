@@ -1,4 +1,5 @@
 """Phase 7.2 tests: shipped-file list, CHECKSUMS.txt, drift detection and --write against temp destinations."""
+import hashlib
 import os
 import shutil
 import subprocess
@@ -13,8 +14,8 @@ from acr import sync
 class Sync(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp(); self.src = os.path.join(self.tmp, "plugin", "skills", "agent-cost-report")
-        os.makedirs(os.path.join(self.src, "scripts", "acr")); os.makedirs(os.path.join(self.src, "scripts", "__pycache__"))
-        for rel, body in (("SKILL.md", "# skill\n"), ("scripts/acr.py", "print(1)\n"), ("scripts/acr/x.py", "x = 1\n"), ("scripts/__pycache__/x.pyc", "junk"), ("README.md", "not shipped\n")):
+        os.makedirs(os.path.join(self.src, "scripts", "acr")); os.makedirs(os.path.join(self.src, "scripts", "__pycache__")); os.makedirs(os.path.join(self.src, "scripts", "tests", "fixtures"))
+        for rel, body in (("SKILL.md", "# skill\n"), ("scripts/acr.py", "print(1)\n"), ("scripts/acr/x.py", "x = 1\n"), ("scripts/__pycache__/x.pyc", "junk"), ("scripts/tests/test_example.py", "test\n"), ("scripts/tests/fixtures/sample.json", "{}\n"), ("README.md", "not shipped\n")):
             with open(os.path.join(self.src, rel), "w") as fh: fh.write(body)
         self.dests = [os.path.join(self.tmp, "house"), os.path.join(self.tmp, "mirror", "skills", "agent-cost-report")]
 
@@ -25,8 +26,10 @@ class Sync(unittest.TestCase):
         self.assertEqual(sync.shipped_files(self.src), ["SKILL.md", "scripts/acr.py", "scripts/acr/x.py"])
         lines = sync.write_checksums(self.src)
         self.assertEqual(len(lines), 3); self.assertTrue(all(len(l.split("  ")[0]) == 64 for l in lines))
-        r = subprocess.run(["sha256sum", "-c", sync.CHECKSUMS], cwd=self.src, capture_output=True, text=True)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        for line in lines:
+            digest, rel = line.split("  ", 1)
+            with open(os.path.join(self.src, rel), "rb") as fh:
+                self.assertEqual(hashlib.sha256(fh.read()).hexdigest(), digest)
 
     def test_drift_then_write(self):
         out = []
@@ -41,7 +44,7 @@ class Sync(unittest.TestCase):
 
     def test_default_destinations_are_the_house_copy_and_four_mirrors(self):
         d = sync.destinations(repo_root="/r", house="/h")
-        self.assertEqual(d, ["/h"] + [f"/r/{m}/skills/agent-cost-report" for m in ("claude-mem-cursor", "claude-mem-grok-bot", "cowork", "openclaw")])
+        self.assertEqual(d, ["/h"] + [os.path.join("/r", m, "skills", "agent-cost-report") for m in ("claude-mem-cursor", "claude-mem-grok-bot", "cowork", "openclaw")])
 
     def test_cli_exit_code(self):
         r = subprocess.run([sys.executable, _paths.ACR_PY, "sync-check", "--dest", self.dests[0]], capture_output=True, text=True)

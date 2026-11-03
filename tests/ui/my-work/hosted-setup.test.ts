@@ -12,8 +12,10 @@ const compiled = buildSync({
       import { ScanScreen } from './src/setup/screens/scan-screen';
       export { localSetupSource, EMPTY_SETUP_DATA } from './src/setup/setup-data';
       export { createSampleSetupSource } from './src/setup/setup-sample';
+      let grantCalls = 0;
+      export const grantCallCount = () => grantCalls;
       export const renderScan = (scan, preferenceError = null, retrying = false, retryError = null) => renderToStaticMarkup(
-        <ScanScreen scan={scan} onImproveProductChange={() => {}} preferenceError={preferenceError} onRetry={() => {}} retrying={retrying} retryError={retryError} />
+        <ScanScreen scan={scan} onImproveProductChange={() => {}} onGrantHostedUpload={() => { grantCalls++; }} hostedError={null} preferenceError={preferenceError} onRetry={() => {}} retrying={retrying} retryError={retryError} />
       );
     `,
   },
@@ -39,7 +41,7 @@ class Stream extends EventTarget {
   close() { this.closed = true; }
   send(name: string, data: unknown) { this.dispatchEvent(new MessageEvent(name, { data: JSON.stringify(data) })); }
 }
-const scan = (changes = {}) => ({ agents: [], percent: 0, phase: 'idle', done: false, error: null, improveProduct: true, ...changes });
+const scan = (changes = {}) => ({ agents: [], percent: 0, phase: 'idle', done: false, error: null, improveProduct: true, hostedUploadAuthorized: false, hostedSkipped: false, ...changes });
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
   let reject!: (reason: unknown) => void;
@@ -61,17 +63,57 @@ function useNetwork(handle: (url: string, init: RequestInit) => Promise<Response
 }
 
 describe('hosted setup scan control', () => {
-  it('renders the approved checkbox checked under the progress meter, and locks it only for upload', () => {
+  it('renders the improvement preference under the progress meter, and locks it only for upload', () => {
     const app = fixture();
     const initial = app.renderScan(app.EMPTY_SETUP_DATA.scan);
     const checkbox = initial.match(/<input[^>]+type="checkbox"[^>]*>/)?.[0] ?? '';
     expect(checkbox).toContain('checked=""');
     expect(checkbox).not.toContain('disabled');
-    expect(initial).toContain('Help make claude-mem smarter for everyone with my anonymized setup results');
     expect(initial.indexOf('<progress')).toBeLessThan(initial.indexOf(checkbox));
     expect(app.renderScan(scan({ phase: 'reading', improveProduct: false }))).not.toContain('checked=""');
     expect(app.renderScan(scan({ phase: 'saving' }))).not.toContain('disabled=""');
-    expect(app.renderScan(scan({ phase: 'uploading' }))).toContain('disabled=""');
+    // Uploading is a settled, authorized run: the whole choice block (checkbox included) is absent.
+    const uploading = app.renderScan(scan({ phase: 'uploading' }));
+    expect(uploading).not.toContain('type="checkbox"');
+    expect(uploading).not.toContain('Send prompts for hosted extraction');
+  });
+
+  it('Decision 15 disclosure: names prompt content, window, destination, metadata, credentials, and non-anonymity before any hosted action', () => {
+    const app = fixture();
+    const html = app.renderScan(app.EMPTY_SETUP_DATA.scan);
+    // Prompt content + window.
+    expect(html).toContain('typed to your AI coding tools in the last 30 days');
+    expect(html).toContain('prompts found stored on this computer');
+    // Destination + metadata + timezone offset.
+    expect(html).toContain('cmem.ai');
+    expect(html).toContain('session identifier');
+    expect(html).toContain('timestamp');
+    expect(html).toContain('project');
+    expect(html).toContain('timezone offset');
+    // Credential association (account when signed in, install otherwise).
+    expect(html).toContain('CMEM account when you are signed in');
+    expect(html).toContain('installation&#x27;s own hosted setup credentials');
+    // Never called anonymous; the old anonymized-upload implication is absent.
+    expect(html).toContain('not anonymous');
+    expect(html).not.toContain('anonymized setup results');
+    // Distinct hosted and local-only actions, and an independent improvement preference.
+    expect(html).toContain('Send prompts for hosted extraction');
+    expect(html).toContain('Continue without uploading');
+    expect(html).toContain('let this hosted run also be used for product improvement');
+    expect(html).toContain('Turning this off does not stop an authorized upload of your prompts');
+  });
+
+  it('Decision 15: a local-only outcome reports the skip (not an error) and keeps the hosted option available', () => {
+    const app = fixture();
+    const skipped = app.renderScan(scan({ phase: 'done', done: true, hostedSkipped: true }));
+    expect(skipped).toContain('Hosted extraction was skipped');
+    expect(skipped).toContain('role="status"');
+    expect(skipped).not.toContain('role="alert">Hosted extraction was skipped');
+    expect(skipped).toContain('Send prompts for hosted extraction');
+    // A hosted outcome (done without a skip) settles: no repeated authorization prompt.
+    const done = app.renderScan(scan({ phase: 'done', done: true, hostedSkipped: false }));
+    expect(done).not.toContain('Send prompts for hosted extraction');
+    expect(done).not.toContain('role="alert"');
   });
 
   it('renders hosted failures and preference failures in the existing alert style', () => {
@@ -311,5 +353,32 @@ describe('hosted setup scan control', () => {
     await until(() => latest.scan.percent === 1);
     expect(latest.scan.improveProduct).toBe(false);
     stop();
+  });
+
+  it('Decision 15: the hosted choice is its own explicit POST, and the sample source flips only its own state', async () => {
+    const app = fixture();
+    const posts: Array<{ url: string; body: any }> = [];
+    useNetwork((url, init) => {
+      if (url === '/api/setup/state') return Response.json({ status: 'pending', alreadyPro: false });
+      if (init.method) posts.push({ url, body: init.body ? JSON.parse(String(init.body)) : null });
+      if (url.endsWith('/hosted-authorization')) return Response.json(scan({ phase: 'reading', hostedUploadAuthorized: true }));
+      return Response.json(scan({ phase: 'reading' }));
+    });
+    let latest: any;
+    const stop = app.localSetupSource.subscribe((data: any) => { latest = data; });
+    await until(() => latest.scan.phase === 'reading');
+    await app.localSetupSource.grantHostedUpload();
+    const grant = posts.find((post) => post.url.endsWith('/hosted-authorization'));
+    expect(grant?.body).toEqual({ authorized: true });
+    // The grant rides no other request: the scan start stays authorization-free.
+    expect(posts.filter((post) => post.url === '/api/setup/scan').every((post) => post.body?.hostedUpload === undefined)).toBe(true);
+    stop();
+    // Sample: the hosted action flips only the sample's own state (nothing is uploaded anywhere).
+    const sample = app.createSampleSetupSource(false, null);
+    let sampleLatest: any;
+    const stopSample = sample.subscribe((data: any) => { sampleLatest = data; });
+    await sample.grantHostedUpload();
+    expect(sampleLatest.scan.hostedUploadAuthorized).toBe(true);
+    stopSample();
   });
 });

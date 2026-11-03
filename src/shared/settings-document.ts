@@ -1,4 +1,6 @@
-import { existsSync, renameSync } from 'fs';
+// Modified by the claude-mem-marian fork: Decision 16 bounded quarantine pruning.
+import { existsSync, lstatSync, readdirSync, renameSync, unlinkSync } from 'fs';
+import { dirname, join } from 'path';
 import { readJsonFileWithBom, writeJsonFileAtomic } from './atomic-json.js';
 
 export type SettingsDocument = Record<string, unknown>;
@@ -9,6 +11,8 @@ export type SettingsDocumentResult = {
   error?: unknown;
   /** Where an unreadable settings.json was moved (quarantineCorrupt only). */
   quarantinedTo?: string;
+  /** Quarantine files a successful replacement could not delete (names only). */
+  pruneFailures?: string[];
 };
 
 const isRecord = (value: unknown): value is SettingsDocument =>
@@ -78,6 +82,63 @@ function unusedQuarantinePath(path: string): string {
   return candidate;
 }
 
+// --- Decision 16: bounded, opportunistic quarantine pruning -----------------
+//
+// Quarantined settings bytes stay sensitive (they can carry credentials), so a
+// successful settings replacement prunes old copies: at most the three newest
+// product-owned `settings.json.corrupt-<epoch-ms>[-n]` regular files are
+// retained and entries older than seven days are deleted. Opportunistic by
+// design — without another successful installer write, files can remain longer
+// than seven days; no background cleanup timer exists. The current recovery
+// file is never pruned (pruning runs only after a successful replacement).
+
+const QUARANTINE_NAME = /^settings\.json\.corrupt-(\d{13})(?:-(\d+))?$/;
+const QUARANTINE_KEEP_COUNT = 3;
+const QUARANTINE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Applies both retention limits to the corrupt-quarantine files beside
+ * `settingsPath` (same directory only; never recursive, never following
+ * links). Symlinks, junctions/reparse points, directories, and malformed names
+ * are skipped. Age uses the encoded timestamp. A deletion failure preserves
+ * the file and reports its name only — never its contents.
+ */
+export function pruneCorruptSettingsQuarantine(settingsPath: string, now: number = Date.now()): string[] {
+  const dir = dirname(settingsPath);
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const matches: Array<{ name: string; full: string; ts: number; seq: number }> = [];
+  for (const name of entries) {
+    const parsed = QUARANTINE_NAME.exec(name);
+    if (!parsed) continue;
+    const full = join(dir, name);
+    try {
+      const stats = lstatSync(full);
+      if (stats.isSymbolicLink() || !stats.isFile()) continue;
+    } catch {
+      continue;
+    }
+    matches.push({ name, full, ts: Number(parsed[1]), seq: Number(parsed[2] ?? 0) });
+  }
+  // Newest first: encoded timestamp, then the collision suffix.
+  matches.sort((a, b) => (b.ts - a.ts) || (b.seq - a.seq));
+  const failures: string[] = [];
+  for (let index = 0; index < matches.length; index++) {
+    const keep = index < QUARANTINE_KEEP_COUNT && (now - matches[index].ts) <= QUARANTINE_MAX_AGE_MS;
+    if (keep) continue;
+    try {
+      unlinkSync(matches[index].full);
+    } catch {
+      failures.push(matches[index].name);
+    }
+  }
+  return failures;
+}
+
 /**
  * Apply `updates` (then `mutate`) to the settings target and write atomically.
  * An unreadable existing file is never overwritten: by default the write is
@@ -117,7 +178,15 @@ export function updateSettingsDocument(
   }
   try {
     writeJsonFileAtomic(path, document, { mode: SETTINGS_FILE_MODE });
-    return { status: loaded.exists ? 'updated' : 'created', document, quarantinedTo };
+    // Decision 16: both retention limits apply only after a successful
+    // replacement — a failed write restores the original and prunes nothing.
+    const pruneFailures = pruneCorruptSettingsQuarantine(path);
+    return {
+      status: loaded.exists ? 'updated' : 'created',
+      document,
+      quarantinedTo,
+      ...(pruneFailures.length ? { pruneFailures } : {}),
+    };
   } catch (error) {
     if (quarantinedTo && restoreQuarantined(quarantinedTo, path)) quarantinedTo = undefined;
     return { status: 'refused', document: loaded.document, error, quarantinedTo };

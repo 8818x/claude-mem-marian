@@ -1,10 +1,12 @@
 
+// Modified by the claude-mem-marian fork: Decision 16 log-boundary credential scrub.
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, statSync, writeSync } from 'fs';
 import { dirname, join } from 'path';
 import { paths } from '../shared/paths.js';
 import { emitDiagnostic } from '../shared/hook-io.js';
 import { readJsonFileWithBom } from '../shared/atomic-json.js';
 import { settingsTarget } from '../shared/settings-document.js';
+import { scrubCredentials } from './credential-redaction.js';
 
 export enum LogLevel {
   DEBUG = 0,
@@ -404,20 +406,27 @@ class Logger {
 
     const logLine = `[${timestamp}] [${levelStr}] [${componentStr}] ${correlationStr}${message}${contextStr}${dataStr}`;
 
+    // Decision 16: mandatory, always-on credential scrub at the final
+    // serialization boundary — the fully assembled line (message, context
+    // fields, serialized data) is scrubbed before the file append, the stderr
+    // fallback, and any logger-failure diagnostic. Independent of the optional
+    // content-redaction settings; original error objects are not mutated.
+    const safeLogLine = scrubCredentials(logLine);
+
     if (this.logFilePath) {
       try {
-        this.appendLine(this.logFilePath, logLine + '\n');
+        this.appendLine(this.logFilePath, safeLogLine + '\n');
       } catch (error: unknown) {
         // [ANTI-PATTERN IGNORED]: this is the logger's own file-write failure path — calling the logger here would recurse into the same failing write, so the error is surfaced via emitDiagnostic to real stderr instead.
         // DIAGNOSTIC: route through hook-io so the message bypasses the Phase 2
         // hook stderr buffer (#2292). Outside the hook context emitDiagnostic
         // writes straight to real stderr, so non-hook callers are unaffected.
         const err = error instanceof Error ? error : new Error(String(error));
-        emitDiagnostic(`[LOGGER] Failed to write to log file: ${err.message}\n${err.stack ?? ''}\n`);
+        emitDiagnostic(`[LOGGER] Failed to write to log file: ${scrubCredentials(err.message)}\n${scrubCredentials(err.stack ?? '')}\n`);
       }
     } else {
       // DIAGNOSTIC: see note above.
-      emitDiagnostic(logLine + '\n');
+      emitDiagnostic(safeLogLine + '\n');
     }
   }
 

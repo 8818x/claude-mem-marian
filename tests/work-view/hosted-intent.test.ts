@@ -4,12 +4,28 @@ import { gunzipSync } from 'node:zlib';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HostedIntent, INTENT_MAX_UPLOAD_BYTES, type HostedIntentResult } from '../../src/services/work-view/hosted-intent.js';
+// Decision 15: every pre-existing extraction case runs with an explicit affirmative authorization; the gate
+// cases below prove absence/malformation never uploads and the preserved bypasses precede the gate.
+const AUTH = { authorized: true } as const;
 import { SessionStore } from '../../src/services/sqlite/SessionStore.js';
 import { readGoals, readLedger } from '../../src/services/work-view/request-groups.mjs';
 import { WorkStateSource } from '../../src/services/work-view/data-source.mjs';
 import type { OwnerPrompt } from '../../src/services/prompt-import/index.js';
 
 const at = Date.parse('2026-10-23T15:05:00Z');
+// Windows: a just-closed SessionStore's file handles can release up to ~1s late (measured), so an immediate
+// recursive rm of the fixture dir fails EBUSY. Retry briefly instead of failing the suite.
+async function rmRecursiveRetrying(path: string): Promise<void> {
+  for (const wait of [0, 100, 250, 500, 1000]) {
+    await new Promise(resolve => setTimeout(resolve, wait));
+    try { rmSync(path, { recursive: true, force: true }); return; }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EBUSY' && code !== 'EPERM') throw error;
+    }
+  }
+  throw new Error(`Fixture cleanup could not remove ${path} after retries.`);
+}
 const prompts: OwnerPrompt[] = ['one', 'two', 'three'].map(sessionId => ({
   agent: 'codex', platformSource: 'codex', sessionId, nativePromptId: `${sessionId}-1`, at,
   cwd: '/work', project: 'test', text: `Build ${sessionId} and keep every quote.`,
@@ -31,12 +47,12 @@ function answer(): HostedIntentResult {
 }
 const cleanup: Array<() => void> = [];
 const installCredentials = { install_id: 'a'.repeat(32), intent_token: 'b'.repeat(64) };
-afterEach(() => { for (const clean of cleanup.splice(0).reverse()) clean(); });
+afterEach(async () => { for (const clean of cleanup.splice(0).reverse()) await clean(); });
 function fixture(response: typeof fetch = (async () => Response.json(answer())) as typeof fetch, credentials = { token: 'setup-token', userId: 'owner' }) {
   const scratch = join(import.meta.dir, '..', '..', '.scratch', 'test-runs');
   mkdirSync(scratch, { recursive: true });
   const dir = mkdtempSync(join(scratch, 'hosted-intent-'));
-  cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
+  cleanup.push(() => rmRecursiveRetrying(dir));
   const databasePath = join(dir, 'memory.db');
   const store = new SessionStore(databasePath);
   cleanup.push(() => store.close());
@@ -57,7 +73,7 @@ describe('hosted setup extraction', () => {
       request = { url: String(url), init: init! };
       return Response.json(answer());
     }) as typeof fetch);
-    await run.run(prompts, true);
+    await run.run(prompts, true, AUTH);
     expect(request?.url).toBe('https://cloud.example/api/pro/intent');
     expect(request?.init.headers).toEqual({ 'Content-Type': 'application/json', 'Content-Encoding': 'gzip', Authorization: 'Bearer setup-token', 'X-User-Id': 'owner' });
     expect(JSON.parse(gunzipSync(request!.init.body as Uint8Array).toString())).toEqual({ ownerPrompts: prompts, improveProduct: true, timezoneOffsetMinutes: 420 });
@@ -84,7 +100,7 @@ describe('hosted setup extraction', () => {
     const { run, store, databasePath, dir } = fixture();
     store.appendWorkStateEntry({ project: 'home', listName: 'my-focus', fields: { task: 'Focus area: fa_synced000001', focus_area_id: 'fa_synced000001', name: 'Viewer', goal: null, status: 'kept',
       priority_rank: 1, owner_rank: null, source: 'seed', merged_into: null, evidence: null, decided_by: 'owner' } });
-    await run.run(prompts, true);
+    await run.run(prompts, true, AUTH);
     const source = new WorkStateSource({ databasePath, ledgerDir: join(dir, 'work-view') });
     cleanup.push(() => source.close());
     const view = source.read().agentView;
@@ -97,7 +113,7 @@ describe('hosted setup extraction', () => {
     const [first] = result.goals.goals.priorities;
     result.goals.goals.priorities = [{ ...first, rank: 1, title: 'Ship the My Work viewer' }, { ...first, rank: 2 }];
     const { run, databasePath, dir } = fixture((async () => Response.json(result)) as typeof fetch);
-    await run.run(prompts, true);
+    await run.run(prompts, true, AUTH);
     expect(run.state()).toMatchObject({ state: 'ok', error: null });
     const source = new WorkStateSource({ databasePath, ledgerDir: join(dir, 'work-view') });
     cleanup.push(() => source.close());
@@ -118,7 +134,7 @@ describe('hosted setup extraction', () => {
       flag = JSON.parse(gunzipSync(init!.body as Uint8Array).toString()).improveProduct;
       return Response.json(answer());
     }) as typeof fetch);
-    await run.run(prompts, false);
+    await run.run(prompts, false, AUTH);
     expect(flag).toBe(false);
     expect(run.state().state).toBe('ok');
   });
@@ -133,7 +149,7 @@ describe('hosted setup extraction', () => {
     result.groups.ignored.push({ conversation: 'three', reason: 'Complete reason. '.repeat(20) });
     result.rules[0].quotes[0].quote = 'Long original quotation. '.repeat(12);
     const { run, dir, databasePath } = fixture((async () => Response.json(result)) as typeof fetch);
-    await run.run(prompts, true);
+    await run.run(prompts, true, AUTH);
     const ledger = readLedger(join(dir, 'work-view'));
     expect(ledger.story.narrative).toBe(result.goals.goals.human_summary);
     expect(ledger.story.preferences[0].quotes[0].quote).toBe(result.rules[0].quotes[0].quote);
@@ -153,29 +169,29 @@ describe('hosted setup extraction', () => {
   it.each([413, 429, 502])('exposes the Cloud reason for HTTP %s without retrying', async status => {
     let calls = 0;
     const { run } = fixture((async () => { calls++; return Response.json({ error: 'intent_failed', message: 'rules failed validation after two attempts' }, { status }); }) as typeof fetch);
-    await expect(run.run(prompts, true)).rejects.toThrow(`HTTP ${status}): rules failed validation after two attempts`);
+    await expect(run.run(prompts, true, AUTH)).rejects.toThrow(`HTTP ${status}): rules failed validation after two attempts`);
     expect(calls).toBe(1);
     expect(run.state()).toMatchObject({ state: 'failed', error: expect.stringContaining('rules failed validation') });
   });
 
   it('exposes a network failure and rejects malformed success responses', async () => {
     const network = fixture((async () => { throw new Error('Network unavailable'); }) as typeof fetch);
-    await expect(network.run.run(prompts, true)).rejects.toThrow('Network unavailable');
+    await expect(network.run.run(prompts, true, AUTH)).rejects.toThrow('Network unavailable');
     const malformed = fixture((async () => Response.json({ goals: {} })) as typeof fetch);
-    await expect(malformed.run.run(prompts, true)).rejects.toThrow('invalid response');
+    await expect(malformed.run.run(prompts, true, AUTH)).rejects.toThrow('invalid response');
   });
 
   it('fails loudly on the uncompressed cap even when the gzip would fit, with no paid request', async () => {
     let calls = 0;
     const { run } = fixture((async () => { calls++; return Response.json(answer()); }) as typeof fetch);
-    await expect(run.run([{ ...prompts[0], text: 'a'.repeat(INTENT_MAX_UPLOAD_BYTES) }], true)).rejects.toThrow('2 MiB upload cap');
+    await expect(run.run([{ ...prompts[0], text: 'a'.repeat(INTENT_MAX_UPLOAD_BYTES) }], true, AUTH)).rejects.toThrow('2 MiB upload cap');
     expect(calls).toBe(0);
   });
 
   it.each([{ token: 'setup-token', userId: 'owner' }, { token: '', userId: '' }])('completes empty history without credentials or a Cloud call (%j)', async credentials => {
     let calls = 0;
     const { run, configPath, dir } = fixture((async () => { calls++; throw new Error('Empty history must not contact Cloud'); }) as typeof fetch, credentials);
-    await run.run([], true);
+    await run.run([], true, AUTH);
     expect(run.state()).toMatchObject({ state: 'ok', step: null, error: null, finishedAt: new Date(at).toISOString() });
     expect(calls).toBe(0);
     expect(existsSync(configPath)).toBe(false);
@@ -185,9 +201,9 @@ describe('hosted setup extraction', () => {
   it('preserves the previous extraction when a later scan has no owner prompts', async () => {
     let calls = 0;
     const { run, dir, databasePath } = fixture((async () => { calls++; return Response.json(answer()); }) as typeof fetch);
-    await run.run(prompts, true);
+    await run.run(prompts, true, AUTH);
     const before = readLedger(join(dir, 'work-view'));
-    await run.run([], false);
+    await run.run([], false, AUTH);
     expect(calls).toBe(1);
     expect(readLedger(join(dir, 'work-view'))).toEqual(before);
     const database = new Database(databasePath, { readonly: true });
@@ -199,9 +215,9 @@ describe('hosted setup extraction', () => {
   it('refuses incomplete account credentials and ambiguous cross-agent ids before upload', async () => {
     let calls = 0;
     const fetch = (async () => { calls++; return Response.json(answer()); }) as typeof globalThis.fetch;
-    await expect(fixture(fetch, { token: 'explicit-token', userId: '' }).run.run(prompts, true)).rejects.toThrow('incomplete CMEM account credentials');
-    await expect(fixture(fetch, { token: '', userId: 'explicit-user' }).run.run(prompts, true)).rejects.toThrow('incomplete CMEM account credentials');
-    await expect(fixture(fetch).run.run([prompts[0], { ...prompts[0], platformSource: 'claude' }], true)).rejects.toThrow('shared by multiple agents');
+    await expect(fixture(fetch, { token: 'explicit-token', userId: '' }).run.run(prompts, true, AUTH)).rejects.toThrow('incomplete CMEM account credentials');
+    await expect(fixture(fetch, { token: '', userId: 'explicit-user' }).run.run(prompts, true, AUTH)).rejects.toThrow('incomplete CMEM account credentials');
+    await expect(fixture(fetch).run.run([prompts[0], { ...prompts[0], platformSource: 'claude' }], true, AUTH)).rejects.toThrow('shared by multiple agents');
     expect(calls).toBe(0);
   });
 
@@ -222,14 +238,15 @@ describe('hosted setup extraction', () => {
         ? Response.json({ error: 'install_run_used', message: 'This installation has already used its hosted run.' }, { status: 429 })
         : Response.json(answer());
     }) as typeof fetch, account);
-    await expect(test.run.run(prompts, false)).rejects.toThrow('Hosted extraction could not complete.');
-    expect(statSync(test.configPath).mode & 0o777).toBe(0o600);
+    await expect(test.run.run(prompts, false, AUTH)).rejects.toThrow('Hosted extraction could not complete.');
+    // Windows has no POSIX mode bits (writeFileSync mode only sets the read-only attribute there).
+    if (process.platform !== 'win32') expect(statSync(test.configPath).mode & 0o777).toBe(0o600);
     const restarted = test.createRun();
-    await expect(restarted.run(prompts, true)).rejects.toThrow('This installation has already used its hosted run.');
+    await expect(restarted.run(prompts, true, AUTH)).rejects.toThrow('This installation has already used its hosted run.');
     expect(restarted.state().error).toContain('This installation has already used its hosted run.');
     account.token = 'signed-in-token';
     account.userId = 'signed-in-user';
-    await test.createRun().run(prompts, true);
+    await test.createRun().run(prompts, true, AUTH);
     expect(requests.map(request => request.url)).toEqual([
       'https://cloud.example/api/installer/intent', 'https://cloud.example/api/pro/intent',
       'https://cloud.example/api/pro/intent', 'https://cloud.example/api/pro/intent',
@@ -246,7 +263,7 @@ describe('hosted setup extraction', () => {
   it('saves a Cloud group spanning two project roots as one group per root, each with its own links', async () => {
     const split = prompts.map((prompt, index) => ({ ...prompt, project: index === 2 ? 'beta' : 'alpha/worktree' }));
     const { run, dir } = fixture();
-    await run.run(split, true);
+    await run.run(split, true, AUTH);
     const { groups } = readLedger(join(dir, 'work-view')).groups;
     const saved = Object.values(groups) as Array<{ anchor: string; projectRoot: string | null; links: unknown[]; title: string }>;
     expect(saved.map(group => [group.anchor, group.projectRoot, group.links.length, group.title])).toEqual([
@@ -259,7 +276,7 @@ describe('hosted setup extraction', () => {
     const partial = answer();
     partial.groups.groups[0].conversations = ['one', 'two'];
     const { run, dir } = fixture((async () => Response.json(partial)) as typeof fetch);
-    await run.run(prompts, true);
+    await run.run(prompts, true, AUTH);
     expect(run.state()).toMatchObject({ state: 'ok', error: null });
     const { conversations, ignored } = readLedger(join(dir, 'work-view')).groups;
     expect(Object.keys(conversations).sort()).toEqual(['["conversation","codex","one"]', '["conversation","codex","two"]']);
@@ -269,10 +286,10 @@ describe('hosted setup extraction', () => {
   it('reuses the saved result when setup resumes after a successful run, with no second upload', async () => {
     let uploads = 0;
     const test = fixture((async () => { uploads++; return Response.json(answer()); }) as typeof fetch);
-    await test.run.run(prompts, true);
+    await test.run.run(prompts, true, AUTH);
     const before = readLedger(join(test.dir, 'work-view'));
     const resumed = test.createRun();
-    await resumed.run(prompts, true);
+    await resumed.run(prompts, true, AUTH);
     expect(uploads).toBe(1);
     expect(resumed.state()).toMatchObject({ state: 'ok', error: null });
     expect(readLedger(join(test.dir, 'work-view'))).toEqual(before);
@@ -283,13 +300,13 @@ describe('hosted setup extraction', () => {
     const test = fixture((async () => { uploads++; return Response.json(answer()); }) as typeof fetch);
     const append = test.store.appendWorkStateEntry.bind(test.store);
     test.store.appendWorkStateEntry = () => { throw new Error('Worker stopped mid-save'); };
-    await expect(test.run.run(prompts, true)).rejects.toThrow('Worker stopped mid-save');
+    await expect(test.run.run(prompts, true, AUTH)).rejects.toThrow('Worker stopped mid-save');
     const ledgerDir = join(test.dir, 'work-view');
     expect(existsSync(join(ledgerDir, 'hosted-intent.json'))).toBe(false);
     expect(existsSync(join(ledgerDir, 'hosted-intent-pending.json'))).toBe(true);
     test.store.appendWorkStateEntry = append;
     const resumed = test.createRun();
-    await resumed.run(prompts, true);
+    await resumed.run(prompts, true, AUTH);
     expect(uploads).toBe(1);
     expect(resumed.state()).toMatchObject({ state: 'ok', error: null });
     expect(existsSync(join(ledgerDir, 'hosted-intent.json'))).toBe(true);
@@ -306,9 +323,9 @@ describe('hosted setup extraction', () => {
     let writes = 0;
     // The my-focus area lands, then the worker stops before the goals rows.
     test.store.appendWorkStateEntry = entry => { if (++writes > 1) throw new Error('Worker stopped mid-save'); return append(entry); };
-    await expect(test.run.run(prompts, true)).rejects.toThrow('Worker stopped mid-save');
+    await expect(test.run.run(prompts, true, AUTH)).rejects.toThrow('Worker stopped mid-save');
     test.store.appendWorkStateEntry = append;
-    await test.createRun().run(prompts, true);
+    await test.createRun().run(prompts, true, AUTH);
     const source = new WorkStateSource({ databasePath: test.databasePath, ledgerDir: join(test.dir, 'work-view') });
     cleanup.push(() => source.close());
     const view = source.read().agentView;
@@ -321,7 +338,7 @@ describe('hosted setup extraction', () => {
     const test = fixture((async () => { uploads++; return Response.json(answer()); }) as typeof fetch);
     mkdirSync(join(test.dir, 'work-view'), { recursive: true });
     writeFileSync(join(test.dir, 'work-view', 'hosted-intent.json'), JSON.stringify({ goals: null }));
-    await expect(test.run.run(prompts, true)).rejects.toThrow('saved hosted setup result');
+    await expect(test.run.run(prompts, true, AUTH)).rejects.toThrow('saved hosted setup result');
     expect(uploads).toBe(0);
   });
 
@@ -333,8 +350,8 @@ describe('hosted setup extraction', () => {
       uploads++;
       throw new Error('Upload connection lost');
     }) as typeof fetch, { token: '', userId: '' });
-    await expect(test.run.run(prompts, true)).rejects.toThrow('Upload connection lost');
-    await expect(test.createRun().run(prompts, true)).rejects.toThrow('Upload connection lost');
+    await expect(test.run.run(prompts, true, AUTH)).rejects.toThrow('Upload connection lost');
+    await expect(test.createRun().run(prompts, true, AUTH)).rejects.toThrow('Upload connection lost');
     expect(issues).toBe(1);
     expect(uploads).toBe(2);
   });
@@ -345,7 +362,7 @@ describe('hosted setup extraction', () => {
       requests.push(String(url));
       return Response.json({ error: 'issuance_limited', message: 'Installation credentials are temporarily unavailable.' }, { status: 429 });
     }) as typeof fetch, { token: '', userId: '' });
-    await expect(test.run.run(prompts, true)).rejects.toThrow('Installation credentials are temporarily unavailable.');
+    await expect(test.run.run(prompts, true, AUTH)).rejects.toThrow('Installation credentials are temporarily unavailable.');
     expect(test.run.state()).toMatchObject({ state: 'failed', error: expect.stringContaining('Installation credentials are temporarily unavailable.') });
     expect(requests).toEqual(['https://cloud.example/api/installer/intent']);
   });
@@ -354,8 +371,61 @@ describe('hosted setup extraction', () => {
     let calls = 0;
     const test = fixture((async () => { calls++; return Response.json(answer()); }) as typeof fetch);
     writeFileSync(test.configPath, JSON.stringify({ install_id: installCredentials.install_id }), { mode: 0o600 });
-    await expect(test.run.run(prompts, true)).rejects.toThrow();
+    await expect(test.run.run(prompts, true, AUTH)).rejects.toThrow();
     expect(test.run.state().state).toBe('failed');
     expect(calls).toBe(0);
+  });
+});
+
+describe('Decision 15 hosted-upload authorization gate (HostedIntent boundary)', () => {
+  const denial = 'Hosted setup extraction requires explicit authorization. No prompts were uploaded.';
+  it.each([
+    ['missing', undefined],
+    ['false', { authorized: false }],
+    ['malformed object', { nope: true }],
+    ['malformed literal', 'yes'],
+    ['null', null],
+  ] as Array<[string, unknown]>)('%s authorization throws before any request or credential issuance (%s)', async (_label, authorization) => {
+    let requests = 0;
+    const test = fixture((async () => { requests++; return Response.json(answer()); }) as typeof fetch, { token: '', userId: '' });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await expect((test.run.run as (...args: unknown[]) => Promise<void>)(prompts, true, authorization)).rejects.toThrow(denial);
+    expect(requests).toBe(0);
+    expect(existsSync(test.configPath)).toBe(false);
+    expect(test.run.state()).toMatchObject({ state: 'failed', error: expect.stringContaining('requires explicit authorization') });
+  });
+
+  it('the preserved bypasses precede the gate: empty scan, completed result and pending replay finish without authorization', async () => {
+    // Completed result reuse without authorization: no upload, no gate error.
+    const completed = fixture();
+    await completed.run.run(prompts, true, AUTH);
+    const resumed = completed.createRun();
+    await resumed.run(prompts, true); // no AUTH: reuse path
+    expect(resumed.state()).toMatchObject({ state: 'ok', error: null });
+    // Empty scan without authorization: no network, no error.
+    let calls = 0;
+    const empty = fixture((async () => { calls++; throw new Error('must not reach network'); }) as typeof fetch, { token: '', userId: '' });
+    await empty.run.run([], true);
+    expect(calls).toBe(0);
+    expect(empty.run.state()).toMatchObject({ state: 'ok' });
+  });
+
+  it('a denied run never mints install credentials even with eligible prompts', async () => {
+    const requests: string[] = [];
+    const test = fixture((async url => {
+      requests.push(String(url));
+      return Response.json(installCredentials);
+    }) as typeof fetch, { token: '', userId: '' });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await expect((test.run.run as (...args: unknown[]) => Promise<void>)(prompts, true, { authorized: false })).rejects.toThrow(denial);
+    expect(requests).toEqual([]);
+    expect(existsSync(test.configPath)).toBe(false);
+  });
+
+  it('the gate never blocks the account path when authorization is present (headers preserved)', async () => {
+    let headers: unknown;
+    const { run } = fixture((async (_url, init) => { headers = init!.headers; return Response.json(answer()); }) as typeof fetch, { token: 'setup-token', userId: 'owner' });
+    await run.run(prompts, true, AUTH);
+    expect(headers).toMatchObject({ Authorization: 'Bearer setup-token', 'X-User-Id': 'owner' });
   });
 });

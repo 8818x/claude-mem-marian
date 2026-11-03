@@ -20,6 +20,12 @@ export const HOOK_MATCH_WINDOW_MS = 10 * 60_000;
 
 export type SetupScanPhase = 'idle' | 'reading' | 'checking' | 'saving' | 'uploading' | 'done' | 'failed';
 
+/** Decision 15: explicit informed hosted-upload authorization for one scan attempt. The affirmative action is
+ * taken in the setup UI under the Decision 15 disclosure; the scan captures it per attempt, consumes it at the
+ * extract handoff, and never persists or replays it. Missing/false/malformed/legacy never authorizes; an
+ * undefined value is a denial, never an omission. */
+export type HostedUploadAuthorization = { authorized: true } | undefined;
+
 export interface SetupScanAgent {
   id: PromptAgentId;
   label: string;
@@ -60,6 +66,11 @@ export interface SetupScanState {
   usageError: string | null;
   /** The owner's newest typed prompts, newest first, quoted as typed (the Reveal shows them while no agent can extract). */
   recentPrompts: SetupRecentPrompt[];
+  /** Decision 15: whether the current/last attempt carries explicit hosted-upload authorization. */
+  hostedUploadAuthorized: boolean;
+  /** Decision 15: true when the last attempt had eligible prompts but finished local-only (no hosted
+   * authorization). The scan never fabricates hosted rows, so the UI reports the skip, not an error. */
+  hostedSkipped: boolean;
 }
 
 export interface SetupRecentPrompt { agent: PromptAgentId; at: string; text: string }
@@ -108,6 +119,7 @@ function idleState(): SetupScanState {
     agents: AGENT_LABELS.map(([id, label]) => ({ id, label, detected: false, prompts: 0, fromMemory: 0, fromTranscripts: 0, canRunSetup: null, cannotRunReason: null })),
     percent: 0, phase: 'idle', done: false, windowStart: null, startedAt: null, finishedAt: null, durationMs: null,
     added: 0, skippedSources: 0, error: null, usage: null, usageError: null, recentPrompts: [],
+    hostedUploadAuthorized: false, hostedSkipped: false,
   };
 }
 
@@ -117,7 +129,10 @@ export class SetupScan {
   private listeners = new Set<(state: SetupScanState) => void>();
   private lastNotified = 0;
   private now: () => number;
-  private extract: ((prompts: OwnerPrompt[], improveProduct: boolean) => Promise<void>) | null = null;
+  private extract: ((prompts: OwnerPrompt[], improveProduct: boolean, authorization: HostedUploadAuthorization) => Promise<void>) | null = null;
+  /** Decision 15: the current attempt's hosted-upload authorization. Set only by an explicit action, consumed
+   * at the extract handoff, and reset at every attempt start — never persisted and never replayed. */
+  private attemptAuthorization = false;
 
   constructor(private options: SetupScanOptions) {
     this.now = options.now ?? Date.now;
@@ -133,7 +148,7 @@ export class SetupScan {
   }
 
   /** Setup has one extraction path, supplied by the worker's hosted service. */
-  setExtractor(extract: (prompts: OwnerPrompt[], improveProduct: boolean) => Promise<void>): void {
+  setExtractor(extract: (prompts: OwnerPrompt[], improveProduct: boolean, authorization: HostedUploadAuthorization) => Promise<void>): void {
     this.extract = extract;
   }
 
@@ -143,12 +158,27 @@ export class SetupScan {
     return this.state();
   }
 
-  /** Starts a scan unless one is running. Resolves with the state at start. */
-  start(improveProduct?: boolean): SetupScanState {
+  /** Starts a scan unless one is running. A concurrent start never attaches its authorization to the
+   * attempt already running. Resolves with the state at start. */
+  start(improveProduct?: boolean, hostedUpload?: HostedUploadAuthorization): SetupScanState {
     if (!this.running) {
+      this.attemptAuthorization = hostedUpload?.authorized === true;
       if (improveProduct !== undefined) this.setImproveProduct(improveProduct);
-      this.running = this.run().finally(() => { this.running = null; });
+      this.running = this.run().finally(() => { this.running = null; this.attemptAuthorization = false; });
     }
+    return this.state();
+  }
+
+  /** Decision 15: an explicit, disclosed hosted-upload action. While a scan runs it authorizes the CURRENT
+   * attempt only if the extract handoff is still ahead; once an attempt is past that point (or none runs) it
+   * starts the next attempt authorized. Never called by automatic state changes. */
+  grantHostedUpload(): SetupScanState {
+    if (this.running && ['reading', 'checking', 'saving'].includes(this.current.phase)) {
+      this.attemptAuthorization = true;
+      this.update({ hostedUploadAuthorized: true }, true);
+      return this.state();
+    }
+    if (!this.running) return this.start(this.current.improveProduct, { authorized: true });
     return this.state();
   }
 
@@ -196,7 +226,9 @@ export class SetupScan {
   private async run(): Promise<void> {
     const startedAt = this.now();
     const windowStart = scanWindowStart(startedAt);
-    this.current = { ...idleState(), improveProduct: this.current.improveProduct, phase: 'reading', windowStart: new Date(windowStart).toISOString(), startedAt: new Date(startedAt).toISOString() };
+    this.current = { ...idleState(), improveProduct: this.current.improveProduct, phase: 'reading',
+      windowStart: new Date(windowStart).toISOString(), startedAt: new Date(startedAt).toISOString(),
+      hostedUploadAuthorized: this.attemptAuthorization };
     this.update({}, true);
     try {
       const runnerCheck = this.checkRunners();
@@ -279,9 +311,20 @@ export class SetupScan {
       const recentPrompts = [...ownerPrompts].sort((left, right) => right.at - left.at).slice(0, RECENT_PROMPTS)
         .map(prompt => ({ agent: prompt.agent, at: new Date(prompt.at).toISOString(), text: prompt.text.trim().slice(0, RECENT_PROMPT_CHARACTERS) }));
       if (this.extract) {
-        // Keep the scan screen open until results are saved; its existing error slot shows Cloud failures.
-        this.update({ phase: 'uploading', percent: 99, agents, added, skippedSources: result.skippedSources.length, usage, usageError, recentPrompts }, true);
-        await this.extract(ownerPrompts, this.current.improveProduct);
+        // Decision 15: with eligible prompts, the extract handoff runs only on an explicit grant. An empty
+        // scan reaches the hosted service's preserved bypass (no network call, no replacement of saved work),
+        // so the setup snapshot keeps reporting the finished extraction as before. The undefined
+        // authorization is a denial, never an omission: HostedIntent rechecks at the final boundary.
+        const authorization: HostedUploadAuthorization = this.attemptAuthorization ? { authorized: true } : undefined;
+        if (ownerPrompts.length === 0 || authorization) {
+          // Keep the scan screen open until results are saved; its existing error slot shows Cloud failures.
+          this.update({ phase: 'uploading', percent: 99, agents, added, skippedSources: result.skippedSources.length, usage, usageError, recentPrompts }, true);
+          await this.extract(ownerPrompts, this.current.improveProduct, authorization);
+        } else {
+          // Eligible prompts but no explicit authorization — a local-only result. The hosted goals/work/rules
+          // stay missing on purpose; the UI reports the skip rather than an error.
+          this.update({ hostedSkipped: true }, true);
+        }
       }
       const finishedAt = this.now();
       this.update({

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+// Modified by the Marian fork: keep Bun's build cache inside the checkout.
 // Generates plugin/bun.lock as a build artifact from the GENERATED
 // plugin/package.json (written by scripts/build-hooks.js). Shipping this
 // lockfile lets the runtime installer (src/npx-cli/install/setup-runtime.ts)
@@ -57,6 +58,10 @@ try {
   execSync('bun install --ignore-scripts', {
     cwd: pluginDir,
     stdio: 'inherit',
+    env: {
+      ...process.env,
+      BUN_INSTALL_CACHE_DIR: path.join(rootDir, '.scratch', 'build-cache', 'bun'),
+    },
   });
 } catch (error) {
   throw new Error(`bun install failed in ${pluginDir}\n${error.message}`);

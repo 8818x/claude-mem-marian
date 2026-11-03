@@ -1,8 +1,10 @@
 # Pi native prompt capture
 
+> **Modified by the claude-mem-marian fork:** This inherited guide is retained as a legacy reference. Marian rejects new Pi installation before writes; existing Pi status/uninstall compatibility is separate.
+
 ## Install and check capture compatibility
 
-Choose Pi with `npx claude-mem install --ide pi`, then restart Pi to load the extension. `npx claude-mem pi status` reports whether the extension files exist. Installation and status do not check the Pi version or verify automatic memory capture, and they do not upgrade Pi.
+New Pi installations are unsupported by Marian. The former upstream install command `npx claude-mem install --ide pi` is rejected before writes. For an existing installation, `npx claude-mem pi status` reports whether the extension files exist; status does not check the Pi version or verify automatic memory capture.
 
 Pi 0.79.6 provides Smart search by default with `mem_search`, `mem_timeline` and `mem_get_observations`; automatic capture and injection are unavailable. The capture lifecycle is source-reviewed for [Pi 1.0.2](https://github.com/earendil-works/pi/blob/cd32f7725fdbddbaecdff5b1e68491563394e0ca/packages/coding-agent/src/core/extensions/runner.ts) and [Pi 1.0.4](https://github.com/earendil-works/pi/blob/7c10bd4337495ee613f2224843ecdf349b80d1df/packages/coding-agent/src/core/extensions/runner.ts). Other or unknown versions require a compatibility check. These samples do not establish the first supported release or compatibility for every newer version.
 

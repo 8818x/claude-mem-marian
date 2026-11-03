@@ -833,10 +833,10 @@ describe('fileContextHandler — File Read Gate', () => {
     expect(result.hookSpecificOutput!.additionalContext).toContain('Rate table refactor');
   });
 
-  it('only denies on Claude Code — codex, kimi and an unknown platform get context', async () => {
+  it('only denies on Claude Code — codex, raw, kimi and an unknown platform get context', async () => {
     answerWithFileHistory();
 
-    for (const platform of ['codex', 'kimi', undefined]) {
+    for (const platform of ['codex', 'raw', 'kimi', undefined]) {
       const result = await fileContextHandler.execute(
         claudeCodeRead({ file_path: gatedFile }, { platform, sessionId: `sess-platform-${platform}` })
       );

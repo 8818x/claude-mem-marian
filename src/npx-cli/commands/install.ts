@@ -1,4 +1,4 @@
-// Modified by the claude-mem-marian fork for Claude Code/Codex-only distribution. Upstream attribution is retained.
+// Modified by the claude-mem-marian fork: new agent-host installs are limited to Claude Code and Codex CLI. Grok Bot runtime surfaces remain preserved. Upstream attribution is retained.
 import * as p from '@clack/prompts';
 import { styleText } from 'node:util';
 import { randomUUID } from 'crypto';
@@ -51,7 +51,6 @@ import { PRO_TRIAL_LABEL, PRO_TRIAL_PITCH, proTrialUrl } from '../../shared/pro-
 import {
   buildAnthropicMaxLocalSettings,
   buildCmemActivationSettings,
-  buildHostObserverSettings,
   buildNonInteractiveOpenRouterSettings,
   buildPersonalOpenRouterSettings,
   resolveCmemMemoryCredentials,
@@ -62,6 +61,7 @@ import { relayedLine } from '../../shared/relayed-text.js';
 import { endSetupSession, INITIAL_SETUP_STATE, readSetupState, startSetupSession, writeSetupState } from '../../shared/setup-state.js';
 import { intentCredentialHeaders, readIntentCredentials } from '../../shared/intent-credentials.js';
 import { runBrowserSetup, settingsChangesNeedingRestart, shouldUseBrowserSetup, waitForBackgroundWorkToFinish, type BrowserSetupOutcome } from '../install/browser-setup.js';
+import { requireMaintainedInstallTarget } from '../../shared/integration-id.js';
 
 function getSetting<K extends keyof SettingsDefaults>(key: K): SettingsDefaults[K] {
   return SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH)[key];
@@ -293,7 +293,8 @@ async function resolveClaudeAutoMemoryChoice(
   return choice;
 }
 
-export function makeIDETask(ideId: string, summary: InstallSummary, dshProfile?: string): TaskDescriptor | null {
+export function makeIDETask(ideId: string, summary: InstallSummary): TaskDescriptor | null {
+  const maintainedId = requireMaintainedInstallTarget(ideId);
   const recordFailure = (label: string, output: string) => {
     // Route every per-IDE failure through the central decision point. A single
     // IDE failure is FAIL_LOUD_PER_IDE (partial install); the summary headline
@@ -307,241 +308,11 @@ export function makeIDETask(ideId: string, summary: InstallSummary, dshProfile?:
     }, summary);
   };
 
-  switch (ideId) {
+  switch (maintainedId) {
     case 'claude-code': {
       return {
         title: 'Claude Code: registering plugin',
         task: async () => `Claude Code: plugin registered ${styleText('green', 'OK')}`,
-      };
-    }
-
-    case 'cursor': {
-      return {
-        title: 'Cursor: installing hooks + MCP',
-        task: async (message) => {
-          message('Loading Cursor installer…');
-          const { installCursorHooks, configureCursorMcp } = await import('../../services/integrations/CursorHooksInstaller.js');
-          message('Installing Cursor hooks…');
-          const { result: cursorResult, output: hooksOutput } = await bufferConsole(() => installCursorHooks('user'));
-          if (cursorResult !== 0) {
-            recordFailure('Cursor: hook installation failed', hooksOutput);
-            return `Cursor: hook installation failed ${styleText('red', 'FAIL')}`;
-          }
-          message('Configuring Cursor MCP…');
-          const { result: mcpResult } = await bufferConsole(async () => configureCursorMcp('user'));
-          if (mcpResult === 0) {
-            return `Cursor: hooks + MCP installed ${styleText('green', 'OK')}`;
-          }
-          return `Cursor: hooks installed; MCP setup failed — run \`npx claude-mem mcp\` ${styleText('yellow', '!')}`;
-        },
-      };
-    }
-
-    case 'grok-bot': {
-      return {
-        title: 'Grok Bot: installing transcript watch',
-        task: async (message) => {
-          message('Configuring Grok Bot transcript watch…');
-          const { installGrokBotIntegration } = await import('../../services/integrations/GrokBotInstaller.js');
-          const { result, output } = await bufferConsole(async () => installGrokBotIntegration());
-          if (result !== 0) {
-            recordFailure('Grok Bot: transcript watch installation failed', output);
-            return `Grok Bot: transcript watch installation failed ${styleText('red', 'FAIL')}`;
-          }
-          return `Grok Bot: transcript watch installed ${styleText('green', 'OK')}`;
-        },
-      };
-    }
-
-    case 'kimi': {
-      return {
-        title: 'Kimi Code: installing hooks + MCP',
-        task: async (message) => {
-          message('Loading Kimi installer…');
-          const { installKimiHooks, configureKimiMcp } = await import('../../services/integrations/KimiHooksInstaller.js');
-          message('Installing Kimi hooks…');
-          const { result: hooksResult, output: hooksOutput } = await bufferConsole(async () => installKimiHooks());
-          if (hooksResult !== 0) {
-            recordFailure('Kimi Code: hook installation failed', hooksOutput);
-            return `Kimi Code: hook installation failed ${styleText('red', 'FAIL')}`;
-          }
-          message('Configuring Kimi MCP…');
-          const { result: mcpResult } = await bufferConsole(async () => configureKimiMcp());
-          if (mcpResult === 0) {
-            return `Kimi Code: hooks + MCP installed ${styleText('green', 'OK')}`;
-          }
-          return `Kimi Code: hooks installed; MCP setup failed — run \`npx claude-mem kimi install\` ${styleText('yellow', '!')}`;
-        },
-      };
-    }
-
-    case 'opencode': {
-      return {
-        title: 'OpenCode: installing plugin',
-        task: async (message) => {
-          message('Loading OpenCode installer…');
-          const {
-            installOpenCodeIntegration,
-            getOpenCodeAgentsMdPath,
-            OPENCODE_MCP_REGISTRATION_INCOMPLETE,
-            OPENCODE_OLD_CONTEXT_BLOCK_LEFT,
-          } = await import('../../services/integrations/OpenCodeInstaller.js');
-          message('Installing OpenCode plugin…');
-          const { result, output } = await bufferConsole(() => installOpenCodeIntegration());
-          if (result === OPENCODE_MCP_REGISTRATION_INCOMPLETE) {
-            // The plugin is installed; only the MCP entry is missing. That is a
-            // partial install, not a failed IDE: record a WARN_CONTINUE warning
-            // (exit 0) and keep the integration's captured output so its
-            // remediation reaches the user after the spinners.
-            installerError(ErrorSeverity.WARN_CONTINUE, {
-              component: 'opencode',
-              phase: 'ide-install',
-              cause: new Error('OpenCode plugin installed, but MCP registration is incomplete (mcp-server.cjs not found).'),
-              remediation: 'Restore the plugin build, then re-run `npx claude-mem install --ide=opencode` to register the MCP server.',
-              details: output,
-            }, summary);
-            return `OpenCode: plugin installed; MCP registration incomplete ${styleText('yellow', '!')}`;
-          }
-          if (result === OPENCODE_OLD_CONTEXT_BLOCK_LEFT) {
-            // Installed, but the stale memory block an older install wrote into
-            // the global AGENTS.md is still there: a warning with the remedy.
-            installerError(ErrorSeverity.WARN_CONTINUE, {
-              component: 'opencode',
-              phase: 'ide-install',
-              cause: new Error(`OpenCode plugin installed, but the old claude-mem memory block in ${getOpenCodeAgentsMdPath()} could not be removed; OpenCode shows it in every project.`),
-              remediation: 'Delete the <claude-mem-context> block from that file (or fix its permissions and re-run `npx claude-mem install --ide=opencode`).',
-              details: output,
-            }, summary);
-            return `OpenCode: plugin installed; old AGENTS.md memory block left in place ${styleText('yellow', '!')}`;
-          }
-          if (result !== 0) {
-            recordFailure('OpenCode: plugin installation failed', output);
-            return `OpenCode: plugin installation failed ${styleText('red', 'FAIL')}`;
-          }
-          return `OpenCode: plugin installed ${styleText('green', 'OK')}`;
-        },
-      };
-    }
-
-    case 'hermes': {
-      return {
-        title: 'Hermes Agent: installing memory provider',
-        task: async (message) => {
-          message('Loading Hermes installer…');
-          const { installHermesIntegration } = await import('../../services/integrations/HermesInstaller.js');
-          message('Installing the memory provider plugin…');
-          const { result, output } = await bufferConsole(async () => installHermesIntegration());
-          if (result !== 0) {
-            recordFailure('Hermes Agent: memory provider installation failed', output);
-            return `Hermes Agent: memory provider installation failed ${styleText('red', 'FAIL')}`;
-          }
-          return `Hermes Agent: memory provider installed ${styleText('green', 'OK')}`;
-        },
-      };
-    }
-
-    case 'pi': {
-      return {
-        title: 'Pi: installing memory extension',
-        task: async () => {
-          const { installPiExtension } = await import('../../services/integrations/PiInstaller.js');
-          const { result, output } = await bufferConsole(async () => installPiExtension());
-          if (result !== 0) {
-            recordFailure('Pi: memory extension installation failed', output);
-            return 'Pi: extension installation failed';
-          }
-          return 'Pi: extension files installed; automatic capture is unverified. Pi 0.79.6 provides manual recall only. ' +
-            'Check your Pi version and update Pi if needed: https://github.com/thedotmack/claude-mem/blob/main/docs/pi-native-capture.md';
-        },
-      };
-    }
-    case 'dsh': {
-      return {
-        title: 'DeepSeek Harness: installing native memory',
-        task: async () => {
-          const { installDeepSeekHarness } = await import('../../services/integrations/DeepSeekHarnessInstaller.js');
-          const { result, output } = await bufferConsole(() => installDeepSeekHarness(dshProfile));
-          if (result === 2) {
-            installerError(ErrorSeverity.WARN_CONTINUE, {
-              component: 'dsh', phase: 'ide-install',
-              cause: new Error('DeepSeek Harness plugin installed, but transcript capture is incomplete.'),
-              remediation: 'Check the transcript config and CLAUDE_MEM_TRANSCRIPTS_ENABLED, then re-run npx claude-mem install --ide dsh --dsh-profile ' + (dshProfile ?? 'web') + '.',
-              details: output,
-            }, summary);
-            return 'DeepSeek Harness: plugin installed; transcript setup incomplete';
-          }
-          if (result !== 0) {
-            recordFailure('DeepSeek Harness: native memory installation failed', output);
-            return 'DeepSeek Harness: installation failed';
-          }
-          return 'DeepSeek Harness: native memory installed';
-        },
-      };
-    }
-    case 'omp': {
-      return {
-        title: 'OMP: installing hooks',
-        task: async (message) => {
-          message('Loading OMP installer…');
-          const { installOmpHooks } = await import('../../services/integrations/OmpHooksInstaller.js');
-          message('Installing OMP hooks…');
-          const { result, output } = await bufferConsole(() => installOmpHooks());
-          if (result !== 0) {
-            recordFailure('OMP: hook installation failed', output);
-            return `OMP: hook installation failed ${styleText('red', 'FAIL')}`;
-          }
-          return `OMP: hooks installed ${styleText('green', 'OK')}`;
-        },
-      };
-    }
-
-    case 'windsurf': {
-      return {
-        title: 'Windsurf: installing hooks',
-        task: async (message) => {
-          message('Loading Windsurf installer…');
-          const { installWindsurfHooks } = await import('../../services/integrations/WindsurfHooksInstaller.js');
-          message('Installing Windsurf hooks…');
-          const { result, output } = await bufferConsole(() => installWindsurfHooks());
-          if (result !== 0) {
-            recordFailure('Windsurf: hook installation failed', output);
-            return `Windsurf: hook installation failed ${styleText('red', 'FAIL')}`;
-          }
-          return `Windsurf: hooks installed ${styleText('green', 'OK')}`;
-        },
-      };
-    }
-
-    case 'openclaw': {
-      return {
-        title: 'OpenClaw: installing plugin',
-        task: async (message) => {
-          message('Loading OpenClaw installer…');
-          const { installOpenClawIntegration } = await import('../../services/integrations/OpenClawInstaller.js');
-          message('Copying plugin files…');
-          const { result, output } = await bufferConsole(() => installOpenClawIntegration());
-          if (result !== 0) {
-            recordFailure('OpenClaw: plugin installation failed', output);
-            return `OpenClaw: plugin installation failed ${styleText('red', 'FAIL')}`;
-          }
-          return `OpenClaw: plugin installed ${styleText('green', 'OK')}`;
-        },
-      };
-    }
-
-    case 't3code': {
-      return {
-        title: 'T3 Code: registering native provider plugins',
-        task: async (message) => {
-          message('Installing hooks and MCP for T3 Code providers…');
-          const { installT3Code } = await import('../../services/integrations/T3CodeInstaller.js');
-          const { result, output } = await bufferConsole(() => installT3Code(marketplaceDirectory()));
-          if (result !== 0) {
-            recordFailure('T3 Code: integration setup failed', output);
-            return `T3 Code: integration setup failed ${styleText('red', 'FAIL')}`;
-          }
-          return `T3 Code: native provider plugins registered ${styleText('green', 'OK')}`;
-        },
       };
     }
 
@@ -562,60 +333,17 @@ export function makeIDETask(ideId: string, summary: InstallSummary, dshProfile?:
       };
     }
 
-    case 'antigravity': {
-      return {
-        title: 'Antigravity: installing hooks + MCP',
-        task: async (message) => {
-          message('Loading Antigravity CLI installer…');
-          const { installAntigravityCliHooks } = await import('../../services/integrations/AntigravityCliHooksInstaller.js');
-          message('Installing Antigravity hooks + MCP…');
-          const { result, output } = await bufferConsole(() => installAntigravityCliHooks());
-          if (result !== 0) {
-            recordFailure('Antigravity: hooks + MCP installation failed', output);
-            return `Antigravity: hooks + MCP installation failed ${styleText('red', 'FAIL')}`;
-          }
-          return `Antigravity: hooks + MCP installed ${styleText('green', 'OK')}`;
-        },
-      };
-    }
-
-    case 'copilot-cli':
-    case 'goose':
-    case 'roo-code':
-    case 'warp': {
-      const allIDEs = detectInstalledIDEs();
-      const ideInfo = allIDEs.find((i) => i.id === ideId);
-      const ideLabel = ideInfo?.label ?? ideId;
-      return {
-        title: `${ideLabel}: installing MCP integration`,
-        task: async (message) => {
-          message('Loading MCP installer…');
-          const { MCP_IDE_INSTALLERS } = await import('../../services/integrations/McpIntegrations.js');
-          const mcpInstaller = MCP_IDE_INSTALLERS[ideId];
-          if (!mcpInstaller) {
-            return `${ideLabel}: MCP installer not found ${styleText('yellow', '!')}`;
-          }
-          message(`Configuring ${ideLabel} MCP…`);
-          const { result, output } = await bufferConsole(() => mcpInstaller());
-          if (result !== 0) {
-            recordFailure(`${ideLabel}: MCP integration failed`, output);
-            return `${ideLabel}: MCP integration failed ${styleText('red', 'FAIL')}`;
-          }
-          return `${ideLabel}: MCP integration installed ${styleText('green', 'OK')}`;
-        },
-      };
-    }
-
     default: {
       return null;
     }
   }
 }
 
-async function setupIDEs(selectedIDEs: string[], summary: InstallSummary, dshProfile?: string): Promise<string[]> {
+async function setupIDEs(selectedIDEs: string[], summary: InstallSummary): Promise<string[]> {
+  const maintainedIDs = selectedIDEs.map(requireMaintainedInstallTarget);
   const tasks: TaskDescriptor[] = [];
-  for (const ideId of selectedIDEs) {
-    const taskDescriptor = makeIDETask(ideId, summary, dshProfile);
+  for (const ideId of maintainedIDs) {
+    const taskDescriptor = makeIDETask(ideId, summary);
     if (taskDescriptor) tasks.push(taskDescriptor);
   }
 
@@ -877,7 +605,7 @@ function writeMarketplaceInstallMarkers(
 /**
  * Install marketplace dependencies, strict-first.
  *
- * Phase 4 of plans/04-installer-transparency.md: the old code ALWAYS passed
+ * Phase 4 of docs/upstream/plans/04-installer-transparency.md: the old code ALWAYS passed
  * `--legacy-peer-deps`, papering over any real peer conflict unconditionally.
  * Now we run strict first and only fall back to `--legacy-peer-deps` on a
  * confirmed ERESOLVE token, announced loudly. `--ignore-scripts` is the default
@@ -967,7 +695,7 @@ export function mergeSettings(
   return true;
 }
 
-type ProviderId = 'claude' | 'codex' | 'gemini' | 'openrouter' | 'openai-compatible' | 'host';
+type ProviderId = 'claude' | 'codex' | 'gemini' | 'openrouter' | 'openai-compatible';
 /**
  * What the installer prompt may offer. `cmem` is a prompt-only sentinel: picking
  * it configures the generic OpenAI-compatible path (base URL + model + key) and
@@ -1017,13 +745,6 @@ function resolveClaudeAuthMethod(): 'subscription' | 'api-key' | 'gateway' {
 
 const DEFAULT_SERVER_RUNTIME_BASE_URL = 'http://127.0.0.1:37877';
 
-function requireSupportedRuntime(selectedIDEs: string[], runtime: RuntimeId): void {
-  if (runtime === 'server' && selectedIDEs.some(id => id === 'pi' || id === 'dsh')) {
-    log.error('Pi and DeepSeek Harness currently require --runtime worker.');
-    process.exit(1);
-  }
-}
-
 async function promptRuntime(options: InstallOptions, selectedIDEs: string[]): Promise<RuntimeId> {
   // #2543 — non-interactive runtime selection via `--runtime`. When the flag is
   // present we never prompt and never fall back to the worker path: we resolve
@@ -1035,7 +756,6 @@ async function promptRuntime(options: InstallOptions, selectedIDEs: string[]): P
       log.error(`Unknown --runtime: ${options.runtime}. Allowed: worker, server`);
       process.exit(1);
     }
-    requireSupportedRuntime(selectedIDEs, requested);
     if (requested === 'server') {
       await setupServerRuntimeNonInteractive(options);
       return 'server';
@@ -1064,7 +784,6 @@ async function promptRuntime(options: InstallOptions, selectedIDEs: string[]): P
     process.exit(0);
   }
 
-  requireSupportedRuntime(selectedIDEs, selected);
   mergeSettings({
     CLAUDE_MEM_RUNTIME: selected,
   });
@@ -1315,17 +1034,6 @@ export async function promptProvider(
     }
     log.info('Configured Codex subscription provider. Run `codex login` before starting the worker.');
     return 'codex';
-  }
-
-  if (selectedProvider === 'host') {
-    const observerModel = options.ide === 'grok-bot' ? 'grok-bot' : 'cursor';
-    const wrote = mergeSettings(buildHostObserverSettings(observerModel, persistedSettings));
-    if (!wrote) {
-      p.cancel('Could not save the host observer configuration.');
-      process.exit(1);
-    }
-    log.info(`Configured host observer for ${observerModel}.`);
-    return 'openrouter';
   }
 
   if (selectedProvider === 'openai-compatible') {
@@ -2250,7 +1958,7 @@ async function promptTelemetryOptIn(): Promise<void> {
 /**
  * Whether an install still has an account question to answer.
  *
- * `--provider claude` and `--provider host` are exempt: they use the user's
+ * `--provider claude` is exempt: it uses the user's
  * existing local credentials and need no claude-mem account. `gemini`,
  * `openrouter` and `codex` are NOT exempt — openrouter is the transport for
  * the cmem gateway, so an explicit `openrouter` install may still be reaching
@@ -2259,17 +1967,16 @@ async function promptTelemetryOptIn(): Promise<void> {
  * CMEM Pro, so login must happen first.
  */
 export function providerNeedsAccount(provider: InstallOptions['provider']): boolean {
-  return provider !== 'claude' && provider !== 'host';
+  return provider !== 'claude';
 }
 
 export interface InstallOptions {
   ide?: string;
-  dshProfile?: string;
   /**
    * `openai-compatible` is never a flag value: it is only ever kept from
    * settings.json by a non-interactive run (`providerSource: 'persisted'`).
    */
-  provider?: 'claude' | 'codex' | 'gemini' | 'openrouter' | 'openai-compatible' | 'host';
+  provider?: 'claude' | 'codex' | 'gemini' | 'openrouter' | 'openai-compatible';
   /**
    * How `provider` was decided. `flag` for an explicit `--provider` (and the
    * grok-bot implicit cmem default set in index.ts), `default` when a fresh
@@ -2566,7 +2273,6 @@ export function validateNonInteractiveProvider(
     log.info('No --provider given on a non-interactive run: defaulting to your Anthropic plan (local memory).');
   }
 
-  if (options.provider === 'host') return;
   if (options.provider !== 'gemini' && options.provider !== 'openrouter') return;
   const keyName = options.provider === 'gemini'
     ? 'CLAUDE_MEM_GEMINI_API_KEY'
@@ -2708,6 +2414,9 @@ export function shouldSkipWorkerAutostart(input: {
 }
 
 export async function runInstallCommand(options: InstallOptions = {}): Promise<void> {
+  if (options.ide !== undefined) {
+    options = { ...options, ide: requireMaintainedInstallTarget(options.ide) };
+  }
   const summary = createInstallSummary();
   try {
     await runInstallCommandInner(options, summary);
@@ -2743,13 +2452,6 @@ export async function runInstallCommand(options: InstallOptions = {}): Promise<v
 }
 
 async function runInstallCommandInner(options: InstallOptions, summary: InstallSummary): Promise<void> {
-  // Explicit host/runtime incompatibility must refuse before provider getters,
-  // runtime settings persistence, or server API-key bootstrap.
-  if (options.ide && options.runtime !== undefined) {
-    const requested = normalizeRuntimeFlag(options.runtime);
-    if (requested !== null) requireSupportedRuntime([canonicalIntegrationId(options.ide)], requested);
-  }
-
   const installStartedAt = Date.now();
   const version = readPluginVersion();
   validateNonInteractiveProvider(options, summary);
@@ -2829,8 +2531,8 @@ async function runInstallCommandInner(options: InstallOptions, summary: InstallS
   }
 
   let selectedIDEs: string[];
-  if (options.ide) {
-    const ideId = canonicalIntegrationId(options.ide);
+  if (options.ide !== undefined) {
+    const ideId = requireMaintainedInstallTarget(options.ide);
     selectedIDEs = [ideId];
     const allIDEs = detectInstalledIDEs();
     const match = allIDEs.find((i) => i.id === ideId);
@@ -2844,6 +2546,7 @@ async function runInstallCommandInner(options: InstallOptions, summary: InstallS
   } else {
     selectedIDEs = ['claude-code'];
   }
+  selectedIDEs = selectedIDEs.map(requireMaintainedInstallTarget);
 
   const selectedRuntime = await promptRuntime(options, selectedIDEs);
 
@@ -2964,7 +2667,7 @@ async function runInstallCommandInner(options: InstallOptions, summary: InstallS
     }
   }
 
-  const failedIDEs = await setupIDEs(selectedIDEs, summary, options.dshProfile);
+  const failedIDEs = await setupIDEs(selectedIDEs, summary);
 
   // Optionally disable Claude Code's built-in auto-memory (CLAUDE_CODE_DISABLE_AUTO_MEMORY=1)
   // when the user explicitly opts in, either through the interactive prompt or
@@ -3082,7 +2785,7 @@ async function runInstallCommandInner(options: InstallOptions, summary: InstallS
   const newlyPickedIDEs = pickedTools.map((tool) => FINISH_SETUP_LOCAL_TOOL_IDES[tool]).filter((ide): ide is string => Boolean(ide) && !selectedIDEs.includes(ide!));
   if (newlyPickedIDEs.length) {
     // Failures land on summary.failedIDEs, the same list the summary reads.
-    await setupIDEs(newlyPickedIDEs, summary, options.dshProfile);
+    await setupIDEs(newlyPickedIDEs, summary);
     selectedIDEs = [...selectedIDEs, ...newlyPickedIDEs];
   }
 
@@ -3117,11 +2820,9 @@ async function runInstallCommandInner(options: InstallOptions, summary: InstallS
         process.exit(1);
       }
     } else {
-      const skipReason = options.provider === 'host'
-        ? 'host observer uses the logged-in host agent over a local OpenAI-compatible shim.'
-        : options.providerSource === 'default'
-          ? 'no --provider was given, so memory defaults to your own Anthropic plan.'
-          : '--provider claude runs memory on your own Anthropic plan.';
+      const skipReason = options.providerSource === 'default'
+        ? 'no --provider was given, so memory defaults to your own Anthropic plan.'
+        : '--provider claude runs memory on your own Anthropic plan.';
       log.info(`Skipping claude-mem login: ${skipReason}`);
     }
     const selectedProvider = await promptProvider(options, oauthPairing, version);
@@ -3195,7 +2896,7 @@ async function runInstallCommandInner(options: InstallOptions, summary: InstallS
   const installStatus = hasFailures ? 'Installation Partial' : 'Installation Complete';
   // Keyed on whether a pairing actually ran, not on the provider class: a
   // persisted account-backed provider skips login and must not claim it. A
-  // persisted claude/host provider holds no claude-mem account at all, so it
+  // persisted claude provider holds no claude-mem account at all, so it
   // reports "not required" rather than a kept account.
   const browserAccountStatus = browserOutcome?.checkoutPaid
     ? `CMEM Pro ${PRO_TRIAL_LABEL} active`
@@ -3206,9 +2907,7 @@ async function runInstallCommandInner(options: InstallOptions, summary: InstallS
       : null;
   const accountStatus = oauthPairing
     ? 'OAuth login complete'
-    : options.provider === 'host'
-      ? 'Not required (host observer)'
-      : !providerNeedsAccount(options.provider)
+    : !providerNeedsAccount(options.provider)
         ? 'Not required (local provider)'
         : options.providerSource === 'persisted'
           ? 'Kept existing account (no login this run)'

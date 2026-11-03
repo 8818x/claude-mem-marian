@@ -17,7 +17,7 @@ dist/
 .claude/worktrees/
 plugin/data/
 plugin/data.backup/
-# Staged per run by scripts/eval-read-gate.ts from evals/read-gate (tracked).
+# Staged per run by scripts/eval-read-gate.ts from tests/evals/read-gate (tracked).
 plugin/evals-read-gate/
 package-lock.json
 bun.lock
@@ -56,6 +56,8 @@ docker/install-test/
 
 # Local session report artifacts (not part of distribution)
 reports/
+# Modified by Marian: task reports are repository maintenance artifacts.
+!/tasks/reports/
 
 # Python bytecode (Hermes provider and tests)
 __pycache__/

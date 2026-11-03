@@ -16,7 +16,13 @@ export interface SetupScanAgent {
 }
 
 export type SetupScanPhase = 'idle' | 'reading' | 'checking' | 'saving' | 'uploading' | 'done' | 'failed'
-export interface SetupScanView { agents: SetupScanAgent[]; percent: number; phase: SetupScanPhase; done: boolean; error: string | null; improveProduct: boolean }
+export interface SetupScanView {
+  agents: SetupScanAgent[]; percent: number; phase: SetupScanPhase; done: boolean; error: string | null; improveProduct: boolean
+  /** Decision 15: whether the current/last attempt carries explicit hosted-upload authorization. */
+  hostedUploadAuthorized: boolean
+  /** Decision 15: the last attempt had eligible prompts but finished local-only (no hosted authorization). */
+  hostedSkipped: boolean
+}
 /** The owner's newest typed prompts, quoted as typed (SetupScanState.recentPrompts). */
 export interface SetupRecentPrompt { agent: string; at: string; text: string }
 /** The worker's subsidized hosted setup extraction. */
@@ -66,6 +72,8 @@ export interface SetupSource {
   subscribe(onData: (data: SetupData) => void): () => void
   /** Starts another scan only after the user chooses to retry a failure. */
   retryScan(): Promise<void>
+  /** Decision 15: the explicit, disclosed hosted-upload authorization action (an attempt-scoped grant). */
+  grantHostedUpload(): Promise<void>
   /** Changes the hosted setup results preference without pausing the scan or upload. */
   setImproveProduct(improveProduct: boolean): Promise<void>
   /** Hands the storage choice to the installer waiting in the terminal (POST /api/setup/choice). */
@@ -84,7 +92,7 @@ export interface SetupSource {
 }
 
 export const EMPTY_SETUP_DATA: SetupData = {
-  scan: { agents: [], percent: 0, phase: 'idle', done: false, error: null, improveProduct: true },
+  scan: { agents: [], percent: 0, phase: 'idle', done: false, error: null, improveProduct: true, hostedUploadAuthorized: false, hostedSkipped: false },
   reveal: { goals: null, work: null, rules: null },
   extraction: null,
   recentPrompts: [],
@@ -99,9 +107,13 @@ export const EMPTY_SETUP_DATA: SetupData = {
 }
 
 /** The worker's answers, trimmed to what this file reads. */
-interface WorkerScanState extends Omit<SetupScanView, 'agents' | 'improveProduct'> {
+interface WorkerScanState extends Omit<SetupScanView, 'agents' | 'improveProduct' | 'hostedUploadAuthorized' | 'hostedSkipped'> {
   /** Older workers do not send the hosted setup preference. */
   improveProduct?: boolean
+  /** Older workers do not send the Decision 15 hosted-authorization state. */
+  hostedUploadAuthorized?: boolean
+  /** Older workers do not send the Decision 15 local-only outcome. */
+  hostedSkipped?: boolean
   /** An older worker sends no canRunSetup / cannotRunReason. */
   agents: Array<Omit<SetupScanAgent, 'canRunSetup' | 'cannotRunReason'> & Partial<Pick<SetupScanAgent, 'canRunSetup' | 'cannotRunReason'>> & { fromMemory?: number; fromTranscripts?: number }>
   /** The 30-day token usage the same pass sums, once the scan is done. */
@@ -142,6 +154,7 @@ const toScanView = (scan: WorkerScanState): SetupScanView => ({
     id, label, detected, prompts, canRunSetup: null, cannotRunReason: null,
   })),
   percent: scan.percent, phase: scan.phase, done: scan.done, error: scan.error, improveProduct: scan.improveProduct ?? true,
+  hostedUploadAuthorized: scan.hostedUploadAuthorized ?? false, hostedSkipped: scan.hostedSkipped ?? false,
 })
 
 // Keep rapid checkbox changes in click order; scan and upload never wait on this queue.
@@ -237,6 +250,11 @@ export const localSetupSource: SetupSource = {
   async retryScan() {
     if (!retryLocalScan) throw new Error('The setup page is not connected to the worker. Reload it to try again.')
     await retryLocalScan()
+  },
+  // Decision 15: the hosted choice posts its own explicit action; it never rides on the scan start or the
+  // improvement preference.
+  async grantHostedUpload() {
+    await postJson('/api/setup/scan/hosted-authorization', { authorized: true })
   },
   async setImproveProduct(improveProduct) {
     desiredImproveProduct = improveProduct

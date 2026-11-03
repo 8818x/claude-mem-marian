@@ -56,12 +56,10 @@
         ]
       },
       {
-        "group": "Cursor Integration",
+        "group": "Cursor (legacy cleanup)",
         "icon": "wand-magic-sparkles",
         "pages": [
-          "cursor/index",
-          "cursor/gemini-setup",
-          "cursor/openrouter-setup"
+          "cursor/index"
         ]
       },
       {

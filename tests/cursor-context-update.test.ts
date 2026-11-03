@@ -2,23 +2,29 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { writeContextFile } from '../src/utils/cursor-utils';
+import { readCursorRegistry } from '../src/utils/cursor-utils';
 
-// Read-back helper for verifying writeContextFile output.
-function readContextFile(workspacePath: string): string | null {
-  const rulesFile = join(workspacePath, '.cursor', 'rules', 'claude-mem-context.mdc');
-  if (!existsSync(rulesFile)) return null;
-  return readFileSync(rulesFile, 'utf-8');
-}
-
-describe('Cursor Context Update', () => {
+// Decision 08: automatic Cursor context updates are retired. The shared summary
+// path no longer calls the updater, so registered workspaces keep their legacy
+// context files and registry bytes exactly as the user left them — and missing
+// context files are never recreated.
+describe('Cursor context retirement (no automatic writes)', () => {
   let tempDir: string;
   let workspacePath: string;
+  let registryFile: string;
+  let contextFile: string;
+  const legacyContextBytes = '---\nalwaysApply: true\n---\n\n# Memory Context from Past Sessions\n\nlegacy context\n';
 
   beforeEach(() => {
     tempDir = join(tmpdir(), `cursor-context-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     workspacePath = join(tempDir, 'my-project');
-    mkdirSync(workspacePath, { recursive: true });
+    registryFile = join(tempDir, 'cursor-projects.json');
+    contextFile = join(workspacePath, '.cursor', 'rules', 'claude-mem-context.mdc');
+    mkdirSync(join(workspacePath, '.cursor', 'rules'), { recursive: true });
+    writeFileSync(contextFile, legacyContextBytes);
+    writeFileSync(registryFile, JSON.stringify({
+      'my-project': { workspacePath, installedAt: '2026-01-01T00:00:00.000Z' }
+    }, null, 2) + '\n');
   });
 
   afterEach(() => {
@@ -29,186 +35,24 @@ describe('Cursor Context Update', () => {
     }
   });
 
-  describe('writeContextFile', () => {
-    it('creates .cursor/rules directory structure', () => {
-      writeContextFile(workspacePath, 'test context');
+  it('retires the automatic context updater', async () => {
+    const mod = await import('../src/services/integrations/CursorHooksInstaller.js');
+    expect((mod as Record<string, unknown>).updateCursorContextForProject).toBeUndefined();
+  });
 
-      const rulesDir = join(workspacePath, '.cursor', 'rules');
-      expect(existsSync(rulesDir)).toBe(true);
-    });
+  it('leaves an existing registered context file byte-identical through a summary cycle', async () => {
+    await import('../src/services/worker/agents/ResponseProcessor.js');
 
-    it('creates claude-mem-context.mdc file', () => {
-      writeContextFile(workspacePath, 'test context');
-
-      const rulesFile = join(workspacePath, '.cursor', 'rules', 'claude-mem-context.mdc');
-      expect(existsSync(rulesFile)).toBe(true);
-    });
-
-    it('includes alwaysApply: true in frontmatter', () => {
-      writeContextFile(workspacePath, 'test context');
-
-      const content = readContextFile(workspacePath);
-      expect(content).toContain('alwaysApply: true');
-    });
-
-    it('includes description in frontmatter', () => {
-      writeContextFile(workspacePath, 'test context');
-
-      const content = readContextFile(workspacePath);
-      expect(content).toContain('description: "Claude-mem context from past sessions (auto-updated)"');
-    });
-
-    it('includes the provided context in the file body', () => {
-      const testContext = `## Recent Session
-
-- Fixed authentication bug
-- Added new feature`;
-
-      writeContextFile(workspacePath, testContext);
-
-      const content = readContextFile(workspacePath);
-      expect(content).toContain('Fixed authentication bug');
-      expect(content).toContain('Added new feature');
-    });
-
-    it('includes Memory Context header', () => {
-      writeContextFile(workspacePath, 'test');
-
-      const content = readContextFile(workspacePath);
-      expect(content).toContain('# Memory Context from Past Sessions');
-    });
-
-    it('includes footer with MCP tools mention', () => {
-      writeContextFile(workspacePath, 'test');
-
-      const content = readContextFile(workspacePath);
-      expect(content).toContain("Use claude-mem's MCP search tools for more detailed queries");
-    });
-
-    it('uses atomic write (no temp file left behind)', () => {
-      writeContextFile(workspacePath, 'test context');
-
-      const tempFile = join(workspacePath, '.cursor', 'rules', 'claude-mem-context.mdc.tmp');
-      expect(existsSync(tempFile)).toBe(false);
-    });
-
-    it('overwrites existing context file', () => {
-      writeContextFile(workspacePath, 'first context');
-      writeContextFile(workspacePath, 'second context');
-
-      const content = readContextFile(workspacePath);
-      expect(content).not.toContain('first context');
-      expect(content).toContain('second context');
-    });
-
-    it('handles empty context gracefully', () => {
-      writeContextFile(workspacePath, '');
-
-      const content = readContextFile(workspacePath);
-      expect(content).toBeDefined();
-      expect(content).toContain('alwaysApply: true');
-    });
-
-    it('preserves multi-line context with proper formatting', () => {
-      const multilineContext = `Line 1
-Line 2
-Line 3
-
-Paragraph 2`;
-
-      writeContextFile(workspacePath, multilineContext);
-
-      const content = readContextFile(workspacePath);
-      expect(content).toContain('Line 1\nLine 2\nLine 3');
-      expect(content).toContain('Paragraph 2');
+    expect(readFileSync(contextFile, 'utf-8')).toBe(legacyContextBytes);
+    expect(readCursorRegistry(registryFile)).toEqual({
+      'my-project': { workspacePath, installedAt: '2026-01-01T00:00:00.000Z' }
     });
   });
 
-  describe('MDC format validation', () => {
-    it('has valid YAML frontmatter delimiters', () => {
-      writeContextFile(workspacePath, 'test');
+  it('never recreates a missing context file for a registered workspace', async () => {
+    rmSync(contextFile);
+    await import('../src/services/worker/agents/ResponseProcessor.js');
 
-      const content = readContextFile(workspacePath)!;
-      const lines = content.split('\n');
-
-      expect(lines[0]).toBe('---');
-
-      const secondDashIndex = lines.indexOf('---', 1);
-      expect(secondDashIndex).toBeGreaterThan(0);
-    });
-
-    it('frontmatter is parseable as YAML', () => {
-      writeContextFile(workspacePath, 'test');
-
-      const content = readContextFile(workspacePath)!;
-      const lines = content.split('\n');
-      const frontmatterEnd = lines.indexOf('---', 1);
-
-      const frontmatter = lines.slice(1, frontmatterEnd).join('\n');
-
-      expect(frontmatter).toMatch(/alwaysApply:\s*true/);
-      expect(frontmatter).toMatch(/description:\s*"/);
-    });
-
-    it('content after frontmatter is proper markdown', () => {
-      writeContextFile(workspacePath, 'test');
-
-      const content = readContextFile(workspacePath)!;
-
-      expect(content).toMatch(/^# Memory Context/m);
-
-      const bodyPart = content.split('---')[2]; 
-      expect(bodyPart).toBeDefined();
-    });
-  });
-
-  describe('edge cases', () => {
-    it('handles special characters in context', () => {
-      const specialContext = '`code` **bold** _italic_ <html> $variable @mention #tag';
-
-      writeContextFile(workspacePath, specialContext);
-
-      const content = readContextFile(workspacePath);
-      expect(content).toContain('`code`');
-      expect(content).toContain('**bold**');
-      expect(content).toContain('<html>');
-    });
-
-    it('preserves BMP unicode and strips astral emoji (issue #2787)', () => {
-      const unicodeContext = 'Emoji: 🚀 Japanese: 日本語 Arabic: العربية';
-
-      writeContextFile(workspacePath, unicodeContext);
-
-      const content = readContextFile(workspacePath);
-      // BMP scripts must survive untouched.
-      expect(content).toContain('日本語');
-      expect(content).toContain('العربية');
-      // Astral emoji are sanitized to BMP so a Claude Code context truncation
-      // can't split a surrogate pair and brick the session.
-      expect(content).not.toContain('🚀');
-      for (let i = 0; i < content!.length; i++) {
-        const code = content!.charCodeAt(i);
-        expect(code < 0xd800 || code > 0xdfff).toBe(true);
-      }
-    });
-
-    it('handles very long context', () => {
-      const longContext = 'x'.repeat(100 * 1024);
-
-      writeContextFile(workspacePath, longContext);
-
-      const content = readContextFile(workspacePath);
-      expect(content).toContain(longContext);
-    });
-
-    it('works when .cursor directory already exists', () => {
-      mkdirSync(join(workspacePath, '.cursor', 'other'), { recursive: true });
-      writeFileSync(join(workspacePath, '.cursor', 'other', 'file.txt'), 'existing');
-
-      writeContextFile(workspacePath, 'new context');
-
-      expect(existsSync(join(workspacePath, '.cursor', 'other', 'file.txt'))).toBe(true);
-      expect(readContextFile(workspacePath)).toContain('new context');
-    });
+    expect(existsSync(contextFile)).toBe(false);
   });
 });

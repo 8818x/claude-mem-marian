@@ -1,4 +1,5 @@
 
+// Modified by the claude-mem-marian fork: unsupported host install/setup commands are rejected before worker settings or logging, and retired host hook routes (Cursor, Kimi, Windsurf, Antigravity CLI) refuse before settings, ports, or cwd restoration; non-loopback binds without CLAUDE_MEM_TV_TOKEN refuse startup before listening (Decision 17). Upstream attribution is retained.
 import path from 'path';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { spawn } from 'child_process';
@@ -10,9 +11,11 @@ import { formatHostForUrl, getWorkerPort, getWorkerHost, fetchWithTimeout, resol
 import { getCurrentWorkerPid, verifyRestartedWorker } from './restart-verify.js';
 import { runShutdownSequence, WORKER_GRACEFUL_SHUTDOWN_DEADLINE_BASE_MS, type WorkerShutdownReason } from './worker-shutdown.js';
 import { DATA_DIR, DB_PATH, USER_SETTINGS_PATH, ensureDir, paths } from '../shared/paths.js';
+import { requireMaintainedInstallTarget, UnsupportedInstallTargetError } from '../shared/integration-id.js';
 import { HookSpool, migrateLegacySessionEndReplay } from '../shared/hook-spool.js';
 import { HookSpoolDrainer, hookSpoolConsumedMarkers } from './worker/hook-spool-drain.js';
 import { HookSpoolRoutes } from './worker/http/routes/HookSpoolRoutes.js';
+import { workerBindRefusal } from './worker/http/middleware.js';
 import { HOOK_TIMEOUTS } from '../shared/hook-constants.js';
 import { getUptimeSeconds } from '../shared/uptime.js';
 import { SettingsDefaultsManager } from '../shared/SettingsDefaultsManager.js';
@@ -662,6 +665,18 @@ export class WorkerService implements WorkerRef {
     const port = getWorkerPort();
     const host = getWorkerHost();
 
+    // Decision 17 (tasks/decisions/decision-17-http-mcp-boundary-remediation-contract.md):
+    // the tokenless worker's only boundary is the bind, so a non-loopback host without a
+    // non-whitespace CLAUDE_MEM_TV_TOKEN refuses here — before the watchdog, the
+    // supervisor, any PID/heartbeat file, and listen(). this.tvToken is the trimmed
+    // settings-file token read in the constructor; whitespace-only is OFF. The
+    // diagnostic never contains the token.
+    const bindRefusal = workerBindRefusal(host, this.tvToken);
+    if (bindRefusal) {
+      logger.failure('SYSTEM', bindRefusal, { host, port });
+      process.exit(WORKER_BOOT_FAILED_EXIT_CODE);
+    }
+
     // Phase 3 telemetry: bridge logged errors into PostHog Error Tracking
     // WITHOUT the logger importing telemetry (no import cycle). captureException
     // enforces consent + kill-switch + rate-limit internally and never throws.
@@ -713,14 +728,6 @@ export class WorkerService implements WorkerRef {
         host,
         allowedPaths: ['/tv', '/tv.html', '/stream', 'GET /api/observations'],
       });
-    } else if (host !== '127.0.0.1' && host !== '::1' && host !== '::ffff:127.0.0.1' && host !== 'localhost') {
-      // Warn, do not refuse to bind: docs/docker.md tells people to set
-      // CLAUDE_MEM_WORKER_HOST=0.0.0.0, and refusing would break that install.
-      logger.warn(
-        'SECURITY',
-        'Worker bound to a non-loopback host with no CLAUDE_MEM_TV_TOKEN — the full worker API, including provider API keys via GET /api/settings, is reachable from the network',
-        { host }
-      );
     }
 
     writePidFile({
@@ -1531,6 +1538,52 @@ function runServerApiKeyCli(args: string[]): never {
 async function main() {
   const { command, args: commandArgs } = parseWorkerServiceCommand(process.argv.slice(2));
 
+  // Decision 08: refuse the retired Cursor hook route before ANY side effect —
+  // plugin-disabled checks, settings loads, port resolution, cwd restoration.
+  // Decision 09: same hoist for the retired Kimi hook route.
+  // Decision 10: same hoist for the retired Windsurf hook route.
+  // Missing event falls through to the existing usage-error behavior.
+  if (command === 'hook' && commandArgs[1]) {
+    if (commandArgs[0] === 'cursor') {
+      const { refuseRetiredCursorHook } = await import('../cli/retired-hooks.js');
+      refuseRetiredCursorHook();
+      return;
+    }
+    if (commandArgs[0] === 'kimi') {
+      const { refuseRetiredKimiHook } = await import('../cli/retired-hooks.js');
+      refuseRetiredKimiHook();
+      return;
+    }
+    if (commandArgs[0] === 'windsurf') {
+      const { refuseRetiredWindsurfHook } = await import('../cli/retired-hooks.js');
+      refuseRetiredWindsurfHook();
+      return;
+    }
+    if (commandArgs[0] === 'antigravity' || commandArgs[0] === 'antigravity-cli') {
+      const { refuseRetiredAntigravityHook } = await import('../cli/retired-hooks.js');
+      refuseRetiredAntigravityHook();
+      return;
+    }
+  }
+
+  const workerInstallTargets: Readonly<Record<string, string>> = {
+    cursor: 'cursor',
+    kimi: 'kimi',
+    'antigravity-cli': 'antigravity-cli',
+  };
+  const action = commandArgs[0]?.toLowerCase();
+  const installTarget = command && workerInstallTargets[command];
+  if (installTarget && (action === 'install' || action === 'setup')) {
+    try {
+      requireMaintainedInstallTarget(installTarget);
+    } catch (error: unknown) {
+      if (!(error instanceof UnsupportedInstallTargetError)) throw error;
+      console.error(error.message);
+      process.exitCode = 1;
+      return;
+    }
+  }
+
   const hookInitiatedCommands = ['start', 'hook', 'restart', '--daemon'];
   if ((command === undefined || hookInitiatedCommands.includes(command)) && isPluginDisabledInClaudeSettings()) {
     // Log the reason instead of exiting silently. Without this line, a disabled
@@ -1848,7 +1901,7 @@ async function main() {
       const event = process.argv[4];
       if (!platform || !event) {
         console.error('Usage: claude-mem hook <platform> <event>');
-        console.error('Platforms: claude-code, codex, cursor, antigravity-cli, raw');
+        console.error('Platforms: claude-code, codex, antigravity-cli, raw');
         console.error('Events: context, session-init, observation, summarize, user-message');
         process.exit(1);
       }

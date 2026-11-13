@@ -16,20 +16,32 @@ The repository keeps `package.json` author credit as Alex Newman. 8818x maintain
 
 ## Unreleased
 
-- Add a DeepSeek Harness host plugin bundle (`dsh-plugin/`) and an OpenCode plugin (`opencode-plugin/`). Both read project memory once per session, send committed user and assistant text to the local worker, accept loopback worker URLs only, time out after two seconds and fail open when the worker is offline. The OpenCode plugin summarizes a session after 60 seconds of quiet because OpenCode 2.2.5 exposes `session.execution.*` per turn and no session-end event.
+Nothing yet.
+
+## Maria-3 — 2026-11-14
+
+Third Marian patch set. No new upstream merge; the source baseline is still upstream [claude-mem v15.5.0](https://github.com/thedotmack/claude-mem/tree/v15.5.0).
+
+- Add a DeepSeek Harness host plugin bundle (`dsh-plugin/`) and an OpenCode plugin (`opencode-plugin/`). Both read project memory once per session, send committed user and assistant text to the local worker, accept loopback worker URLs only, time out after two seconds and fail open when the worker is offline. The OpenCode plugin summarizes a session after 60 seconds of quiet because OpenCode 2.2.5 exposes `session.execution.*` per turn and has no session-end event.
+- Point the DSH bridge at the worker's default port `37777`, so the documented install needs no extra port configuration.
 - Show the DeepSeek Harness and OpenCode agent marks in the My Work agent icon, so every recorded host renders its own logo instead of the neutral fallback mark.
 - Document the supported host bridges and recommend the `claude` or `openai-compatible` observation provider over the `codex` subprocess route in the README.
+- Keep local task reports out of the repository: `tasks/` is ignored and no longer tracked.
+- Verification: both plugin suites passed (5 DSH bridge tests, 6 OpenCode tests); the My Work typecheck and its 121 tests passed with the new agent marks; the root and viewer typechecks passed. The full `npm test` fast lane did not complete on this machine and is not claimed.
+
+## Maria-2 — 2026-11-03
+
+Second Marian patch set, based on upstream [claude-mem v15.5.0](https://github.com/thedotmack/claude-mem/tree/v15.5.0), merged at `d7c2da3e5f9397b394dbc6b6966f4b261b489f7b`.
+
 - Declare source/GitHub Release distribution, prohibit public marketplace and npm publication, and retain local marketplace manifests.
 - Default both web apps to Mocha before JavaScript mounts and when no valid theme is saved. Keep explicit flavor choices and legacy system preferences.
 - Document the fork's tested local-marketplace install path for Claude Code and Codex, including source builds, same-version cache updates and worker verification.
 - Request structured progress reviews with explicit per-field budgets. Keep the existing validator and retry only refused groups; regression coverage reproduces a 228-character change and preserves accepted reviews and evidence.
 - Retain restricted Windows filesystem/network permissions and classify unsupported elevated/MXC backends alongside the split-read refusal. Local CLI probes confirm none of the available native backends can enforce this refresh profile on this executor; no sandbox bypass is used.
-
 - Use `main` as the fork's working/default branch, preserving the complete Marian history.
 - Add Latte, Frappé, Macchiato and Mocha to My Work and Classic Viewer, using the official Catppuccin 1.8.0 palette and retained MIT notice. Both apps share persistent preferences and migrate old light/dark choices.
 - Add `REPOSITORY-GUIDE.md` and a full per-file inventory in `docs/repository-files.md`.
 - Theme verification: root/viewer typechecks, full build and both repository lint checks passed; 121 viewer/UI tests and 121 My Work tests passed. The existing Chrome helper skipped 65 browser tests on Windows. Playwright independently checked all four built themes in both apps, persisted reloads, legacy preferences, preview URLs and mobile presentation. My Work used sample fixtures; Classic Viewer API responses were stubbed. No installed-worker deployment was performed.
-
 - Maintain only Claude Code and Codex installation choices and distribution targets; retire other standalone client packages, their builders and dedicated setup assets/tests.
 - Retain original third-party license, NOTICE and provenance files in `docs/upstream-notices`, with upstream authorship preserved.
 - Document OpenRouter through the OpenAI-compatible route and its separate `CLAUDE_MEM_OPENAI_COMPAT_OBSERVATION_BATCH_SIZE` setting. LLM providers and shared memory/history handling are retained.

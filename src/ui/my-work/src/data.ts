@@ -9,7 +9,7 @@ import type { WorkDataSource, WorkModel } from './live/work-data-source.ts'
 
 export interface Device { id: string; name: string; syncedMinutesAgo: number; online: boolean }
 /** 'other' is any platform without its own mark (a neutral mark is shown). */
-export type AgentTool = 'claude' | 'codex' | 'gemini' | 'other'
+export type AgentTool = 'claude' | 'codex' | 'gemini' | 'dsh' | 'opencode' | 'other'
 /** One running agent. Several can share a tool, so each also has a role and the machine it runs on (§13.2). */
 /**
  * `status` is set only for a subagent, from recorded evidence: `finished` means a recorded stop (its SubagentStop,

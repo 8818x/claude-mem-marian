@@ -18,8 +18,8 @@ const SOLO_REQUESTER = 'You'
 const NEXT_STEP_NOT_RECORDED = 'Next step not recorded'
 /** A request is built from its prompts; until an agent records work it has only asks. */
 const NO_WORK_YET = 'No agent work recorded yet'
-const KNOWN_TOOLS: AgentTool[] = ['claude', 'codex', 'gemini']
-const PLATFORM_LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini' }
+const KNOWN_TOOLS: AgentTool[] = ['claude', 'codex', 'gemini', 'dsh', 'opencode']
+const PLATFORM_LABEL: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', gemini: 'Gemini', dsh: 'DeepSeek Harness', opencode: 'OpenCode' }
 const EVIDENCE_URL = /^\/api\/work-view\/evidence\/(work-state|observation|prompt|summary|session)\/\d+$/
 // work-product.mjs kinds onto the drawer's kinds; anything unknown is a plain link.
 const WORK_PRODUCT_KIND: Record<string, WorkProductKind> = {

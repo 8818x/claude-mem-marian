@@ -6,7 +6,9 @@
 Read the [repository guide](docs/marian/reference/repository-guide.md) for folder responsibilities. My Work and Classic Viewer include the four [Catppuccin](https://github.com/catppuccin/catppuccin) themes: Latte, Frappé, Macchiato and Mocha.
 
 <p align="center">
-  <img src="docs/public/marian-edition-logo.png" width="900" alt="claude-mem — Maria(n)-edition">
+  <a href="https://github.com/8818x/claude-mem-marian">
+    <img src="docs/public/marian-edition-logo-transparent.png" width="900" alt="claude-mem — Maria(n)-edition" style="background-color:#101010;border-radius:12px;padding:12px">
+  </a>
 </p>
 
 # Marian
@@ -25,27 +27,47 @@ Marian is maintained by [8818x](https://github.com/8818x) and is a fork of [clau
 
 ## Supported agents
 
-The maintained installation targets are **Claude Code** and **Codex CLI**. Standalone packages, builders and dedicated setup tests for retired clients are no longer shipped. Shared memory code, historical record readers and LLM providers remain available.
+The maintained installation targets are **Claude Code** and **Codex CLI**; both use claude-mem's own hooks. Two optional bridge plugins give other hosts the same capture-and-recall loop through the local worker:
 
-Original license, NOTICE and provenance files from retired integrations are retained in [docs/upstream-notices](docs/upstream-notices).
+| Host | How memory reaches it | Entry point |
+| --- | --- | --- |
+| Claude Code | Built-in hooks | This repository's local marketplace |
+| Codex CLI | Built-in hooks | This repository's local marketplace |
+| DeepSeek Harness | Host plugin bundle | [dsh-plugin](dsh-plugin/README.md) |
+| OpenCode | Plugin file in the OpenCode config directory | [opencode-plugin](opencode-plugin/README.md) |
+
+The bridges send committed user and assistant text to the local worker, read project memory once per session, and fail open when the worker is offline. They accept loopback worker URLs only, so turns cannot be sent off the machine.
+
+Standalone packages, builders and dedicated setup tests for retired clients are no longer shipped. Shared memory code, historical record readers and LLM providers remain available. Original license, NOTICE and provenance files from retired integrations are retained in [docs/upstream-notices](docs/upstream-notices).
+
+## Choose the observation provider
+
+Agent installation and the observation provider are separate choices. Marian recommends either of these two, because both run the observer as plain API requests with claude-mem's own batching and result handling:
+
+- `claude` — the Anthropic Messages API, directly or through a compatible gateway. This is the default and the reference path.
+- `openai-compatible` — any OpenAI-compatible chat-completions endpoint, including a preset or an OpenRouter base URL.
+
+The `codex` provider drives the Codex CLI as a subprocess instead. It is worth using only on a host where no other provider credential exists, because it needs a logged-in Codex install and inherits that CLI's context handling.
+
+Reasoning effort is provider-specific. `CLAUDE_MEM_CODEX_REASONING_EFFORT` and `CLAUDE_MEM_OPENROUTER_REASONING_EFFORT` accept `low`. The `claude` route has no effort setting; `CLAUDE_MEM_OBSERVER_THINKING` controls thinking on it instead, and the shipped `disabled` value is the cheapest.
 
 ## Distribution policy
 
-This fork is not published to a public plugin marketplace or npm.
+This fork is not published to npm or any public plugin marketplace.
 
-Supported plugin installation uses this repository or a GitHub source release, registered as a local marketplace. The `.claude-plugin/`, `.codex-plugin/` and `plugin/` manifests remain for local Claude Code and Codex integration; they do not declare public marketplace publication.
+Install the plugin from a clone or source archive of this repository. Build it, then register that local directory as a marketplace in Claude Code or Codex. The `.claude-plugin/`, `.codex-plugin/` and `plugin/` manifests support this local installation; their presence does not publish or list the fork publicly.
 
 ```text
-GitHub repository or Maria-N release
+GitHub repository or Maria-N source release
     ↓
-clone / download source
+clone / download and build source
     ↓
 local marketplace add
     ↓
 local plugin install
 ```
 
-GitHub Releases are allowed. Public marketplace submissions, listing sync and npm publication are prohibited. No release workflow should publish this fork to a public registry.
+GitHub Releases are allowed. Publish source under a `Maria-N` tag, such as `Maria-2`; do not use upstream `v*` tags. After creating the GitHub Release, stop. Do not submit the fork to a public marketplace, sync a public listing or publish to npm.
 
 ## Install this fork
 

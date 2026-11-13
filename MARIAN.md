@@ -1,19 +1,24 @@
 # Marian patch history
 
-This file records changes maintained by the **claude-mem-marian** fork. Fork patches use their own names and tags; upstream version numbers describe the source baseline, not a Marian patch release.
+This file records changes made by the **claude-mem-marian** fork. `Maria-N` names identify fork patches and releases. Upstream version numbers identify the source baseline; they are not Marian release numbers.
 
 ## Distribution policy
 
-This fork is not published to a public plugin marketplace or npm. Supported installation uses the repository or a GitHub source release, registered through a local marketplace. Marketplace manifests remain solely for local Claude Code and Codex integration; they are not publication declarations.
+This fork is not published to npm or any public plugin marketplace. Install from a repository clone or GitHub source release: build the source, then register its local directory as a marketplace in Claude Code or Codex. Marketplace manifests remain for local integration; they do not publish or list the fork publicly.
 
 ```text
-commit → Maria-N tag → push → GitHub Release → stop
+commit → push main → verify remote commit → create and push Maria-N tag → GitHub Release → stop
 ```
 
-Public marketplace submissions, public listing sync and npm publication are prohibited. Local marketplace registration and GitHub Releases are allowed. The repository keeps `package.json` author credit as Alex Newman; 8818x maintains the fork and its modifications.
+Use `Maria-N` tags for fork releases. Do not create upstream-style `v*` tags. After the GitHub Release, do not publish to npm, submit to a public marketplace or sync a public listing. Local marketplace registration and GitHub Releases are allowed.
+
+The repository keeps `package.json` author credit as Alex Newman. 8818x maintains the fork and its modifications.
 
 ## Unreleased
 
+- Add a DeepSeek Harness host plugin bundle (`dsh-plugin/`) and an OpenCode plugin (`opencode-plugin/`). Both read project memory once per session, send committed user and assistant text to the local worker, accept loopback worker URLs only, time out after two seconds and fail open when the worker is offline. The OpenCode plugin summarizes a session after 60 seconds of quiet because OpenCode 2.2.5 exposes `session.execution.*` per turn and no session-end event.
+- Show the DeepSeek Harness and OpenCode agent marks in the My Work agent icon, so every recorded host renders its own logo instead of the neutral fallback mark.
+- Document the supported host bridges and recommend the `claude` or `openai-compatible` observation provider over the `codex` subprocess route in the README.
 - Declare source/GitHub Release distribution, prohibit public marketplace and npm publication, and retain local marketplace manifests.
 - Default both web apps to Mocha before JavaScript mounts and when no valid theme is saved. Keep explicit flavor choices and legacy system preferences.
 - Document the fork's tested local-marketplace install path for Claude Code and Codex, including source builds, same-version cache updates and worker verification.

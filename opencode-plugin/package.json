@@ -1,0 +1,25 @@
+{
+  "name": "@local/claude-mem-opencode",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Send OpenCode turns to the local claude-mem worker and inject project memory.",
+  "exports": {
+    ".": "./claude-mem.js"
+  },
+  "files": [
+    "claude-mem.js",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": "*"
+  },
+  "peerDependenciesMeta": {
+    "@opencode/plugin": {
+      "optional": true
+    }
+  }
+}

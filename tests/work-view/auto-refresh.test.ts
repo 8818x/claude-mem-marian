@@ -501,6 +501,37 @@ describe('review repair', () => {
       expect(progress[acceptedId].readings).toHaveLength(1);
     } finally { database.close(); rmSync(dir, { recursive: true, force: true }); }
   });
+  it('a review still oversized after the retry waits for the next refresh instead of failing the run', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'auto-refresh-review-stuck-'));
+    const database = fixtureDatabase();
+    try {
+      database.prepare('INSERT INTO sdk_sessions VALUES (?, ?, ?, ?, ?, ?, ?)').run(2, 'claude', 'b', 'm2', 'repo/tree', 'Build another feature', NOW - 2 * DAY);
+      database.prepare('INSERT INTO user_prompts (session_db_id, prompt_number, prompt_text, created_at_epoch) VALUES (?, ?, ?, ?)').run(2, 1, 'Build another feature', NOW - 2 * DAY);
+      const decisions = join(dir, 'decisions.json');
+      writeFileSync(decisions, JSON.stringify({ groups: ['a', 'b'].map(session => ({ title: `Feature ${session}`, conversations: [key(session)] })) }));
+      runCli(['apply', decisions], { dir, database, now: NOW, print: () => {} });
+      const refresh = buildRefreshTask({ localDeviceId: () => '', needs: { due: 2, ungrouped: 0, goalsStale: false, unplaced: 0, needed: true }, reason: 'scheduled', dataDir: dir, ledgerDir: dir, pluginRoot: PLUGIN_ROOT, openDatabase: handle(database), now: () => NOW, saveFocus: focusWriter(database).save });
+      const oversized = 'Retain the evidence while shortening this review. ' + 'x'.repeat(1257);
+      let attempts = 0;
+      const ask = async (prompt: string) => {
+        if (prompt.includes('Do only section 4')) return JSON.stringify({ narrative: 'Work continues.' });
+        if (prompt.includes('Do only section 3')) return everyRequestInOther(prompt);
+        const shows = JSON.parse(readFileSync(/is in (\S+\.json)/.exec(prompt)![1], 'utf8'));
+        attempts++;
+        if (shows.length === 2) {
+          return JSON.stringify({ reviews: [
+            { groupId: shows[0].groupId, state: 'in-progress', percent: 10, summary: 'Already accepted review.', reviewBasis: shows[0].reviewBasis },
+            { groupId: shows[1].groupId, state: 'in-progress', percent: 30, summary: 'Under way.', narrative: oversized, evidence: ['observation 42'], reviewBasis: shows[1].reviewBasis },
+          ] });
+        }
+        return JSON.stringify({ reviews: [{ groupId: shows[0].groupId, state: 'in-progress', percent: 30, summary: 'Under way.', narrative: oversized, evidence: ['observation 42'], reviewBasis: shows[0].reviewBasis }] });
+      };
+      expect(await refresh.run(ask, 'claude-code')).toBe('1 requests reviewed, 2 requests placed, story written.');
+      expect(attempts).toBe(2);
+      const progress = readLedger(dir).progress;
+      expect(Object.keys(progress)).toHaveLength(1);
+    } finally { database.close(); rmSync(dir, { recursive: true, force: true }); }
+  });
 });
 
 describe('parallel reviews', () => {

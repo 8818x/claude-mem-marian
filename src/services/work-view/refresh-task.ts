@@ -425,7 +425,7 @@ export function buildRefreshTask(options: RefreshTaskOptions): AgentTask & { ste
           const text = await ask([
             requestProgress, '---', readOnly,
             `Do only section 2's review for the groups whose \`show\` output is in ${writeInput('show', shows)}: decide each one from the evidence as the reviewer task describes (amend the previous review for a group in "amend" mode). Reply with only {"reviews": [<one record-progress input per group, with reviewBasis copied verbatim from its show output>]}.`,
-            'Keep each outcome.changes[].what within 200 characters and why within 400. Aim below those ceilings; rewrite rather than cutting off sentences. Preserve evidence, dates and reviewBasis when correcting a refusal.',
+            'Keep each outcome.changes[].what within 200 characters and why within 400; each summary within 280 and narrative within 1200. Aim below those ceilings; rewrite rather than cutting off sentences. Preserve evidence, dates and reviewBasis when correcting a refusal.',
             refusals.length ? `Your previous answer was refused for these groups:\n${refusals.join('\n')}\nFix them and answer again for those groups only. Here are the rejected reviews to correct, preserving their evidence and reviewBasis:\n${JSON.stringify(rejectedReviews)}` : '',
           ].join('\n\n'), STEP_MODELS.review, REVIEW_ANSWER_SCHEMA);
           let reviews: Array<{ groupId?: string }> = [];
@@ -441,7 +441,13 @@ export function buildRefreshTask(options: RefreshTaskOptions): AgentTask & { ste
           shows = shows.filter(show => !recorded.has(show.groupId));
           for (const show of shows) if (!refusals.some(line => line.startsWith(`${show.groupId}:`))) refusals.push(`${show.groupId}: no review was given.`);
         }
-        if (shows.length) throw new Error(`reviews: ${refusals.join('; ').slice(0, 500)}`);
+        // A review the model cannot bring under its text budgets after the retry stays due for the next
+        // refresh (Nov 14: two overlong reviews killed 22 whole runs); any other refusal still fails the run.
+        const stuck = shows.filter(show => {
+          const lines = refusals.filter(line => line.startsWith(`${show.groupId}:`));
+          return lines.length > 0 && lines.every(line => /: \S+ is \d+ characters; it must be 1–\d+\./.test(line));
+        });
+        if (shows.some(show => !stuck.includes(show))) throw new Error(`reviews: ${refusals.join('; ').slice(0, 500)}`);
       };
       // Batches are independent, so a few run at once; every batch finishes (and saves) before a failure is reported.
       // Not all at once: each batch is its own agent process, and a large backlog (Oct 25: ~1,100 due groups,

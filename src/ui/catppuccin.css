@@ -2,6 +2,9 @@
  * Copyright (c) 2021 Catppuccin. MIT; see docs/upstream-notices/catppuccin-LICENSE.txt.
  * Shared by My Work and Classic Viewer; existing layouts keep their semantic tokens. */
 
+/* The :root[data-theme] selector out-ranks the bare :root Mocha fallback below: equal-specificity
+ * attribute selectors lost to the later :root rule, so every non-Mocha switch silently stayed Mocha (Nov 14). */
+:root[data-theme="latte"],
 [data-theme="latte"] {
   --ctp-rosewater: #dc8a78;
   --ctp-flamingo: #dd7878;
@@ -32,6 +35,7 @@
   color-scheme: light;
 }
 
+:root[data-theme="frappe"],
 [data-theme="frappe"] {
   --ctp-rosewater: #f2d5cf;
   --ctp-flamingo: #eebebe;
@@ -62,6 +66,7 @@
   color-scheme: dark;
 }
 
+:root[data-theme="macchiato"],
 [data-theme="macchiato"] {
   --ctp-rosewater: #f4dbd6;
   --ctp-flamingo: #f0c6c6;
@@ -92,8 +97,8 @@
   color-scheme: dark;
 }
 
-:root,
-[data-theme="mocha"] {
+[data-theme="mocha"],
+:root {
   --ctp-rosewater: #f5e0dc;
   --ctp-flamingo: #f2cdcd;
   --ctp-pink: #f5c2e7;

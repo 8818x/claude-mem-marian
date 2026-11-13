@@ -38,15 +38,16 @@ export function Header({
       <div className="header-main">
         <a href="/" className="local-work-link" title="Open your local work and review queue">My Work</a>
         <h1>
-          <div style={{ position: 'relative', display: 'inline-block' }}>
-            <img src="claude-mem-logomark.webp" alt="" className={`logomark ${isProcessing ? 'spinning' : ''}`} />
+          {/* Modified by the Marian fork: the Marian logo links to this fork's GitHub. */}
+          <a href="https://github.com/8818x/claude-mem-marian" target="_blank" rel="noopener noreferrer" title="claude-mem Marian edition on GitHub" style={{ position: 'relative', display: 'inline-block' }}>
+            <img src="marian-edition-logo-transparent.png" alt="Marian edition" className={`logomark ${isProcessing ? 'spinning' : ''}`} />
             {queueDepth > 0 && (
               <div className="queue-bubble">
                 {queueDepth}
               </div>
             )}
-          </div>
-          <span className="logo-text">claude-mem</span>
+          </a>
+          <span className="logo-text">claude-mem Marian</span>
         </h1>
         {/* Most people running the free plugin never learn the trial exists.
             It sits beside the logo (not in .status) so it survives the

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Claude-mem session bridge",
-    "description": "Sends committed DSH user and assistant text to the local claude-mem worker, then adds project memories to new DSH sessions. Start the worker at http://127.0.0.1:37954. Only loopback HTTP URLs are allowed. Turns, project path, and session id stay on this computer; recalled memory is also sent to the DSH model provider. The bridge fails open when the worker is offline."
+    "description": "Sends committed DSH user and assistant text to the local claude-mem worker, then adds project memories to new DSH sessions. Start the worker at http://127.0.0.1:37777. Only loopback HTTP URLs are allowed. Turns, project path, and session id stay on this computer; recalled memory is also sent to the DSH model provider. The bridge fails open when the worker is offline."
   }
 }

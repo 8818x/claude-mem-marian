@@ -17,11 +17,11 @@ test('ignores missing or malformed content', () => {
 });
 
 test('allows loopback worker URLs only', () => {
-  assert.equal(localWorkerBase('http://127.0.0.1:37954'), 'http://127.0.0.1:37954');
-  assert.equal(localWorkerBase('http://localhost:37954/path'), 'http://localhost:37954');
-  assert.equal(localWorkerBase('http://[::1]:37954'), 'http://[::1]:37954');
-  assert.equal(localWorkerBase('https://127.0.0.1:37954'), null);
-  assert.equal(localWorkerBase('http://example.com:37954'), null);
+  assert.equal(localWorkerBase('http://127.0.0.1:37777'), 'http://127.0.0.1:37777');
+  assert.equal(localWorkerBase('http://localhost:37777/path'), 'http://localhost:37777');
+  assert.equal(localWorkerBase('http://[::1]:37777'), 'http://[::1]:37777');
+  assert.equal(localWorkerBase('https://127.0.0.1:37777'), null);
+  assert.equal(localWorkerBase('http://example.com:37777'), null);
   assert.equal(localWorkerBase('not a url'), null);
 });
 
@@ -43,7 +43,7 @@ test('does not inject duplicate context on resume or compact', async () => {
         inject: (message) => injected.push(message),
       };
       const ctx = { on: (name, listener) => { hostListeners.set(name, listener); return () => {}; } };
-      const dispose = apply(ctx, { workerUrl: 'http://127.0.0.1:37954' });
+      const dispose = apply(ctx, { workerUrl: 'http://127.0.0.1:37777' });
       await hostListeners.get('agent/created')({ agent, source });
       assert.deepEqual(injected, []);
       dispose();
@@ -93,7 +93,7 @@ test('injects memory and captures committed text only', async () => {
         return () => hostListeners.delete(name);
       },
     };
-    const dispose = apply(ctx, { workerUrl: 'http://127.0.0.1:37954' });
+    const dispose = apply(ctx, { workerUrl: 'http://127.0.0.1:37777' });
     await hostListeners.get('agent/created')({ agent, source: 'startup' });
     assert.equal(injected[0].content[0].text, 'saved memory');
     assert.deepEqual(injected[0].source, { kind: 'user' });

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 const PLATFORM_SOURCE = 'dsh';
-const DEFAULT_WORKER_URL = 'http://127.0.0.1:37954';
+const DEFAULT_WORKER_URL = 'http://127.0.0.1:37777';
 const TIMEOUT_MS = 2000;
 
 export function textFromContent(content) {

@@ -2,4 +2,4 @@
     - id: claude-mem-marian-dsh
       name: '@local/claude-mem-marian-dsh'
       config:
-        workerUrl: 'http://127.0.0.1:37954'
+        workerUrl: 'http://127.0.0.1:37777'

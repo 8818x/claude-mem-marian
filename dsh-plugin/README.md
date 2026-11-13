@@ -12,7 +12,7 @@ This Host plugin connects DeepSeek Harness (DSH) to the existing local claude-me
 - Uses a two-second request timeout and fails open if the worker is offline.
 - Sends requests only to loopback HTTP hosts: `localhost`, `127.0.0.1`, or `::1`.
 
-The worker must listen at `http://127.0.0.1:37954`, or `workerUrl` must be changed in `cordis.patch.yml`. The worker URL is checked before any request. The integration sends DSH turns and project paths to the local worker. Recalled memory is also sent to the model provider selected in DSH.
+The worker must listen at `http://127.0.0.1:37777`, or `workerUrl` must be changed in `cordis.patch.yml`. The worker URL is checked before any request. The integration sends DSH turns and project paths to the local worker. Recalled memory is also sent to the model provider selected in DSH.
 
 ## Install
 

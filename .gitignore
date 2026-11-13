@@ -53,11 +53,10 @@ CLAUDE.local.md
 .docker-blowout-data/
 .scratch/
 docker/install-test/
+tasks/
 
 # Local session report artifacts (not part of distribution)
 reports/
-# Modified by Marian: task reports are repository maintenance artifacts.
-!/tasks/reports/
 
 # Python bytecode (Hermes provider and tests)
 __pycache__/

@@ -18,7 +18,7 @@ The repository keeps `package.json` author credit as Alex Newman. 8818x maintain
 
 - Fix the automatic refresh dying when a review cannot be brought under its text budgets: reviews still oversized after the retry stay due for the next refresh instead of failing the whole run, and the review ask now states the summary (280) and narrative (1200) budgets. Regression test reproduces the stuck-review path (`tests/work-view/auto-refresh.test.ts`).
 - Fix the shared Catppuccin stylesheet losing every non-Mocha switch: the later bare `:root` Mocha rule out-ranked the equal-specificity per-theme selectors. Light themes now carry `:root[data-theme=…]`; regression test guards the ordering (`tests/viewer/theme-tokens.test.ts`). Verified live in a headless browser: all four flavors change and persist across reloads.
-- Show the Marian edition logo in My Work and Classic Viewer; the logo links to this fork's GitHub repository. Verified live on both served pages.
+- Brand My Work and Classic Viewer as "claude-mem" with a small "Maria-n edition" subtitle; the brand links to this fork's GitHub repository. Verified live on both served pages.
 
 ## Maria-3 — 2026-11-14
 

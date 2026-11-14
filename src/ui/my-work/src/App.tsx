@@ -220,10 +220,10 @@ function LoadedApp() {
                 <Navbar className="top-0 z-30">
                   <HeaderBody>
                     <Req ids={['R10.4']}>
-                      {/* Modified by the Marian fork: the Marian logo links to this fork's GitHub. */}
-                      <a href="https://github.com/8818x/claude-mem-marian" target="_blank" rel="noreferrer" aria-label="claude-mem Marian edition on GitHub" className="flex shrink-0 items-center gap-2">
-                        <img src="marian-edition-logo-transparent.png" alt="" className="size-8" />
-                        <span className="sr-only md:not-sr-only md:text-[0.95rem] md:font-semibold md:tracking-tight">claude-mem Marian</span>
+                      {/* Modified by the Marian fork: the brand links to this fork's GitHub. */}
+                      <a href="https://github.com/8818x/claude-mem-marian" target="_blank" rel="noreferrer" aria-label="claude-mem Marian edition on GitHub" className="flex shrink-0 flex-col items-start leading-tight">
+                        <span className="text-[0.95rem] font-semibold tracking-tight">claude-mem</span>
+                        <span className="text-[0.62rem] opacity-70">Maria-n edition</span>
                       </a>
                     </Req>
                     <h1 className="min-w-0 truncate text-lg font-semibold tracking-tight whitespace-nowrap md:hidden [.header-pill_&]:text-base">{heading}</h1>

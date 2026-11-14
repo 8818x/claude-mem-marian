@@ -1,5 +1,5 @@
 {
-  "name": "@local/claude-mem-marian-dsh",
+  "name": "@marian/claude-mem-dsh",
   "version": "1.0.0",
   "private": true,
   "type": "module",
